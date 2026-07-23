@@ -60,7 +60,7 @@ class SecuritySanitizer:
 
         # 3. Redact Phone Numbers
         text = re.sub(
-            r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,3}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}\b",
+            r"\b(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?(?:9?\d{4}[-.\s]?\d{4})\b",
             "[REDACTED PHONE]",
             text,
         )
