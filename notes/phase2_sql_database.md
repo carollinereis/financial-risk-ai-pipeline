@@ -95,3 +95,42 @@ ORDER BY c.customer_id;
 | 102 | Bob Jones | $32,000 | 820 | 1 |
 | 103 | Carlos Silva | $45,000 | 510 | 5 |
 | 104 | Diana Prince | $115,000 | 790 | 0 |
+
+
+
+## 5. Security & Data Privacy Layer (`src/security.py`)
+
+In production financial systems, AI components must comply with strict data privacy regulations (e.g., LGPD / GDPR) to prevent leakage of Personally Identifiable Information (PII) to downstream processing pipelines or external APIs.
+
+---
+
+### Key Architectural Features
+
+1. **Local Privacy Enforcement:** Running models locally via Ollama guarantees that customer data remains within the local network perimeter and is never transmitted over the internet or logged by external API providers.
+
+2. **Feature Flag Governance (`ENABLE_PII_MASKING`):**
+   * **Development Mode (`False`):** Retains human-readable mock data (`Alice Smith`) for effortless local debugging, database inspection, and clear visual demos.
+   * **Production / Compliance Mode (`True`):** Intercepts data right before feature engineering and LLM consumption to enforce strict automated PII scrubbing.
+
+3. **Structured Attribute Masking (`sanitize_customer_profile`):** Replaces sensitive identifiers (such as customer full names) with deterministic, anonymous reference tokens (`ANON_USER_101`).
+
+4. **Dynamic Unstructured Text Redaction (`redact_pii_from_text`):** 
+   * Uses regular expressions (`re`) to scrub emails, phone numbers, and Brazilian CPFs.
+   * **Context-Aware Name Redaction:** Dynamically strips full names (*"Alice Smith"*) and standalone first names (*"Alice"*) from qualitative bank notes using case-insensitive boundary regex and `re.escape()`.
+
+---
+
+### Verification & Visual Inspection
+
+The security layer was tested against both operational states to verify data integrity and redaction accuracy:
+
+#### 1. Development Mode (`ENABLE_PII_MASKING = False`)
+*Maintains raw mock data for local testing and visualization.*
+
+[Click to view Security Layer - Unmasked Output](./images/unsmasked_screenshot.png)
+
+#### 2. Compliance Mode (`ENABLE_PII_MASKING = True`)
+*Scrubs all sensitive metadata before passing logs to the LLM agent.*
+
+[Click to view Security Layer - Masked Output](./images/masked_screenshot.png)
+
