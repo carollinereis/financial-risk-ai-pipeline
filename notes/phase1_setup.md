@@ -1,19 +1,37 @@
-# Phase 1: Environment & Tooling Setup
+# Phase 1 Notes: Project Architecture & Environment Setup
 
-**Date:** July 22, 2026  
-**Hardware:** Mac Mini (2024) — Apple M4 Chip, 16GB Unified Memory  
-**Objective:** Set up an isolated Python development environment and run a local LLM using Ollama with Metal hardware acceleration.
+```text
+financial-risk-ai-pipeline/
+├── data/                  # Dynamic synthetic datasets and DuckDB storage
+├── models/                # Serialized model artifacts (.joblib)
+├── src/                   # Core application source code
+│   ├── config.py          # Centralized configuration & environment flags
+│   ├── database.py        # Embedded DuckDB database connector
+│   ├── generate_data.py   # Synthetic data generation engine
+│   ├── credit_risk_model.py # ML model class implementation
+│   ├── train_model.py     # Training, evaluation & persistence execution
+│   └── security.py        # PII masking & prompt injection defenses
+├── tests/                 # System test suites
+├── requirements.txt       # Managed dependency versions
+└── README.md              # Project overview and pipeline documentation
+```
+
+## 1. What Was Built & How It Is Organized
+
+To keep the pipeline clean and maintainable, the project structure isolates configuration, storage, logic, and tests into dedicated folders:
+
+* **Source Directory (`src/`):** Houses Python modules responsible for data generation, database connections, model training, and security guardrails.
+* **Data Folder (`data/`):** Holds raw generated CSV files (`customers.csv`) and the embedded analytical database (`financial_risk.duckdb`).
+* **Models Directory (`models/`):** Stores serialized machine learning artifacts (like `.joblib` model files) so they can be reused without retraining.
+* **Configuration (`src/config.py`):** Serves as a single control panel for system-wide flags, like toggling privacy masking on or off.
 
 ---
 
-## 1. Python Virtual Environment Setup
+## 2. Setting Up the Virtual Environment & Dependencies
 
-A virtual environment (`venv`) keeps our project dependencies isolated from the global Mac system settings.
+To ensure the project runs smoothly across different computers without package conflicts, virtual environment isolation is established:
 
 ```bash
-# Check Python version (requires Python 3.10+)
-python3 --version
-
 # Create virtual environment named 'venv'
 python3 -m venv venv
 
@@ -25,27 +43,28 @@ source venv/bin/activate
 echo "venv/" >> .gitignore
 ```
 
-## 2. Local LLM Setup (Ollama)
+### Dependency Management (`requirements.txt`)
 
-Instead of relying on paid cloud APIs (e.g., OpenAI or Anthropic), we run open-source models locally using **Ollama**. On Apple Silicon (M4), Ollama automatically leverages Metal acceleration and Unified Memory to run models at high speeds with zero API cost and 100% data privacy.
+Create a `requirements.txt` file in the project root directory with the core dependencies required for data processing, machine learning, analytical storage, and security testing:
 
-### Installation & Execution
-1. Installed **Ollama for macOS** from [ollama.com](https://ollama.com).
-2. Opened the application and verified it runs in the background.
-3. Downloaded and launched Meta's `Llama 3.2` model directly from the VS Code integrated terminal:
-
-```bash
-# Download and launch interactive chat with Llama 3.2 ollama run llama3.2
+```text
+pandas
+duckdb
+scikit-learn
+xgboost
+faker
+joblib
 ```
 
-### Verification & Testing
+To install all dependencies inside the active virtual environment:
 
-- Model: ```Llama 3.2``` (~2.0 GB lightweight parameter model)
-- Test Query: _"Give me a 1-sentence definition of credit risk in finance."_
-- Exit Command: Type ```/bye``` to close the session.
+```Bash
+pip install -r requirements.txt
+```
 
-## 3. Key Concepts Learned
+## 3. Main Problems Solved & Lessons Learned
 
-* **Virtual Environment Isolation (`venv`):** Prevents project-specific dependencies from clashing with system-wide Python packages or other projects.
-* **Local Inference vs. Cloud APIs:** Running models locally using Ollama keeps financial data completely private, eliminates token costs, and operates offline using Apple M4 Unified Memory.
-* **Git Hygiene:** Using a `.gitignore` file ensures heavy binary files (like local virtual environments in `venv/` or cached database files) are never committed to GitHub, keeping the repository lightweight and clean.
+| Issue & Error Message | Root Cause | Fix / Implementation |
+| :--- | :--- | :--- |
+| **`FileNotFoundError` on cross-platform paths** <br> `FileNotFoundError: [Errno 2] No such file or directory: 'data/customers.csv'` | Hardcoded Unix-style relative strings break when scripts execute from nested subdirectories or different OS environments. | Refactored setup script to use dynamic base pathing with `pathlib`:<br>```python<br>from pathlib import Path<br>BASE_DIR = Path(__file__).resolve().parent.parent<br>DATA_PATH = BASE_DIR / "data" / "customers.csv"<br>``` |
+| **Dependency pollution / Module errors** <br> `ModuleNotFoundError: No module named 'duckdb'` | Execution defaulted to system Python (`/usr/bin/python3`) instead of the isolated environment binary. | Standardized run instructions to explicitly source `venv` and added a check inside `config.py` to assert runtime environment: <br>```python<br>import sys<br>assert sys.prefix != sys.base_prefix, "Run inside venv!"<br>``` |

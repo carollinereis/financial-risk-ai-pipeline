@@ -224,3 +224,19 @@ venv/
 data/*.db
 data/*.duckdb
 data/*.csv
+
+# Python bytecode & cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+.venv/
+
+# Database files
+*.duckdb
+*.duckdb.wal
+
+# Local environment variables / secrets
+.env
