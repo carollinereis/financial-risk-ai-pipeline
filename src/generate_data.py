@@ -152,5 +152,27 @@ def generate_synthetic_customers(num_records=100) -> pd.DataFrame:
     print("✓ Generated data/customers.csv with CPF, email, and phone fields.")
     return df
 
+# Inside src/generate_data.py
+
+def generate_underwriter_note(delinquencies: int, credit_score: int, dti: float) -> str:
+    """Generates realistic notes aligned with quantitative metrics."""
+    notes = []
+    
+    # Red Flag notes tied to quantitative data
+    if delinquencies > 0:
+        notes.append(f"Customer has {delinquencies} late payment(s) recorded in the last 24 months.")
+    if credit_score < 600:
+        notes.append("Recent score drop due to high revolving credit usage.")
+    if dti > 0.40:
+        notes.append("High debt-to-income ratio indicates limited monthly cash buffer.")
+        
+    # Positive Signal notes tied to quantitative data
+    if credit_score >= 750 and delinquencies == 0:
+        notes.append("Excellent payment history with consistent automated payments.")
+    if dti < 0.20:
+        notes.append("Strong income stability and low financial leverage.")
+        
+    return " ".join(notes) if notes else "Standard profile, no significant behavioral flags."
+
 if __name__ == "__main__":
     generate_synthetic_customers()

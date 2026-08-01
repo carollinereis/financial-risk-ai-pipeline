@@ -36,7 +36,7 @@ def run_training_pipeline():
     df["model_version"] = MODEL_VERSION
     df["scored_at"] = datetime.now()
 
-    # 5. Save .joblib artifact and bulk update DuckDB
+    # 5. Save XGBoost native JSON artifact and bulk update DuckDB
     model_pipeline.save_model()
     
     with get_db_connection() as conn:
