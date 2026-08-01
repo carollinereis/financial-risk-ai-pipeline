@@ -1,7 +1,6 @@
 import sys
 from pathlib import Path
 import pandas as pd
-import joblib
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
@@ -12,6 +11,7 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.append(str(project_root))
 
+from src.config import MODEL_PATH
 from src.database import get_db_connection
 
 # Configuration Constants
@@ -103,9 +103,18 @@ class CreditRiskModel:
         """Returns 0.0–1.0 risk probability scores."""
         return self.model.predict_proba(X)[:, 1]
 
-    def save_model(self, path: str = f"models/{MODEL_VERSION}.joblib"):
-        """Persists trained model artifact to disk."""
-        models_dir = Path(path).parent
-        models_dir.mkdir(exist_ok=True)
-        joblib.dump(self.model, path)
-        print(f"Saved model artifact to {path}")
+    def save_model(self, path: Path | str | None = None) -> Path:
+        """Persists trained model artifact in XGBoost native JSON format."""
+        output_path = Path(path) if path is not None else MODEL_PATH
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.model.save_model(str(output_path))
+        print(f"Saved model artifact to {output_path}")
+        return output_path
+
+    @classmethod
+    def load_model(cls, path: Path | str | None = None) -> XGBClassifier:
+        """Loads a trained model from XGBoost native JSON format."""
+        model_path = Path(path) if path is not None else MODEL_PATH
+        instance = cls()
+        instance.model.load_model(str(model_path))
+        return instance.model

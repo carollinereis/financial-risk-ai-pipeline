@@ -11,11 +11,25 @@ from src.database import get_db_connection
 
 
 def sanitize_input(text: str) -> str:
-    """Strips potential prompt injection characters/tags from text."""
+    """Strips potential prompt injection characters/tags and attack phrases from text."""
     if not isinstance(text, str):
         return ""
-    # Remove HTML tags, brackets, and backslashes
+
+    # 1. Remove HTML tags, brackets, and backslashes (your original cleanup)
     cleaned = re.sub(r"[<>{}\\]", "", text)
+
+    # 2. Strip known prompt injection command patterns
+    injection_patterns = [
+        r"(?i)ignore\s+(all\s+|previous\s+|prior\s+)?instructions.*",
+        r"(?i)system\s+prompt.*",
+        r"(?i)override\s+(decision|rules).*",
+        r"(?i)and\s+return\s+approved.*",
+        r"(?i)and\s+approve.*"
+    ]
+
+    for pattern in injection_patterns:
+        cleaned = re.sub(pattern, "[REDACTED_INJECTION_ATTEMPT]", cleaned)
+
     return cleaned.strip()
 
 
