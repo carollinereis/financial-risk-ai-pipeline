@@ -2,6 +2,8 @@ import random
 import pandas as pd
 from faker import Faker
 
+from src.infra.config import CSV_PATH
+
 fake = Faker()
 Faker.seed(42)
 random.seed(42)
@@ -32,6 +34,28 @@ def compute_default_probability(row: dict) -> float:
         + 0.10 * (1 - min(row["employment_length_years"] / 10, 1.0))
     )
     return min(max(score, 0.0), 1.0)
+
+# Inside src/generate_data.py
+
+def generate_underwriter_note(delinquencies: int, credit_score: int, dti: float) -> str:
+    """Generates realistic notes aligned with quantitative metrics."""
+    notes = []
+    
+    # Red Flag notes tied to quantitative data
+    if delinquencies > 0:
+        notes.append(f"Customer has {delinquencies} late payment(s) recorded in the last 24 months.")
+    if credit_score < 600:
+        notes.append("Recent score drop due to high revolving credit usage.")
+    if dti > 0.40:
+        notes.append("High debt-to-income ratio indicates limited monthly cash buffer.")
+        
+    # Positive Signal notes tied to quantitative data
+    if credit_score >= 750 and delinquencies == 0:
+        notes.append("Excellent payment history with consistent automated payments.")
+    if dti < 0.20:
+        notes.append("Strong income stability and low financial leverage.")
+        
+    return " ".join(notes) if notes else "Standard profile, no significant behavioral flags."
 
 FIRST_NAMES = ["James", "Mary", "John", "Patricia", "Robert", "Jennifer", "Michael", "Linda", "David", "Elizabeth", "Carlos", "Ana"]
 LAST_NAMES = ["Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Silva", "Santos"]
@@ -130,6 +154,8 @@ def generate_synthetic_customers(num_records=100) -> pd.DataFrame:
             "employment_length_years": employment
         })
 
+        notes = generate_underwriter_note(delinquencies, credit_score, dti)
+
         record = {
             "customer_id": i,
             "full_name": full_name,
@@ -143,36 +169,16 @@ def generate_synthetic_customers(num_records=100) -> pd.DataFrame:
             "loan_amount_requested": loan_amount,
             "employment_length_years": employment,
             "is_high_risk": int(prob >= 0.35),
-            "underwriter_notes": f"Automated synthetic applicant profile for {full_name}."
+            "underwriter_notes": notes
         }
         records.append(record)
 
     df = pd.DataFrame(records)
-    df.to_csv("data/customers.csv", index=False)
+
+    CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(CSV_PATH, index=False)
     print("✓ Generated data/customers.csv with CPF, email, and phone fields.")
     return df
-
-# Inside src/generate_data.py
-
-def generate_underwriter_note(delinquencies: int, credit_score: int, dti: float) -> str:
-    """Generates realistic notes aligned with quantitative metrics."""
-    notes = []
-    
-    # Red Flag notes tied to quantitative data
-    if delinquencies > 0:
-        notes.append(f"Customer has {delinquencies} late payment(s) recorded in the last 24 months.")
-    if credit_score < 600:
-        notes.append("Recent score drop due to high revolving credit usage.")
-    if dti > 0.40:
-        notes.append("High debt-to-income ratio indicates limited monthly cash buffer.")
-        
-    # Positive Signal notes tied to quantitative data
-    if credit_score >= 750 and delinquencies == 0:
-        notes.append("Excellent payment history with consistent automated payments.")
-    if dti < 0.20:
-        notes.append("Strong income stability and low financial leverage.")
-        
-    return " ".join(notes) if notes else "Standard profile, no significant behavioral flags."
 
 if __name__ == "__main__":
     generate_synthetic_customers()

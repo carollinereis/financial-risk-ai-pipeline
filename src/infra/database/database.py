@@ -43,6 +43,15 @@ def fetch_customer_by_id(customer_id: int) -> Optional[dict]:
         columns = [desc[0] for desc in conn.description]
         return dict(zip(columns, result))
 
+def fetch_customer_notes(customer_id: int) -> Optional[str]:
+    """Fetches the raw (unsanitized) underwriter notes for a single customer."""
+    with get_db_connection() as conn:
+        result = conn.execute(
+            "SELECT underwriter_notes FROM customers WHERE customer_id = $1",
+            [customer_id],
+        ).fetchone()
+
+    return result[0] if result and result[0] else None
 
 def ensure_risk_columns(conn) -> None:
     """Schema migration helper for ML risk scores."""

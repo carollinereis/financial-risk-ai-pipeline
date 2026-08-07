@@ -1,13 +1,12 @@
-# src/agents.py
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
-from src.agent_tools import get_customer_financial_profile, get_sanitized_customer_notes
+from src.domain.entities import CustomerProfile
 
-# Initialize local Llama 3 model via Ollama
-llm = ChatOllama(model="llama3.1", temperature=0.0) # Set temp to 0.0 for deterministic compliance
+# Initialize local Llama 3 model via Ollama (deterministic compliance)
+llm = ChatOllama(model="llama3.1", temperature=0.0)
 
 
 # ==========================================
@@ -20,15 +19,18 @@ Evaluate the following customer metrics deterministically:
 Customer Profile:
 {profile_data}
 
+Model Default Risk (XGBoost): {xgb_score}
+Quantitative Policy Assessment: {quant_standing}
+
 CRITICAL RULES:
 - Credit score < 620 is HIGH RISK.
 - Debt-to-income (DTI) > 0.40 is HIGH RISK.
-- `live_xgb_risk_score` > 0.50 indicates HIGH PROBABILITY OF DEFAULT.
+- XGBoost Risk Score > 0.50 indicates HIGH PROBABILITY OF DEFAULT.
 
 Instructions:
 Provide a clear quantitative summary:
 1. Identify metric vulnerabilities (Credit Score, DTI, Delinquencies).
-2. Explicitly state the XGBoost Risk Score.
+2. Explicitly state the XGBoost Risk Score and Quantitative Policy Assessment.
 3. Classify overall quantitative standing as: [SAFE, MODERATE, or CRITICAL RISK].
 """)
 
@@ -89,39 +91,82 @@ cro_agent = cro_prompt | llm
 # ==========================================
 # MULTI-AGENT ORCHESTRATION PIPELINE
 # ==========================================
-def run_underwriting_pipeline(customer_id: int):
-    print(f"\n==================================================")
-    print(f"RUNNING MULTI-AGENT RISK AUDIT FOR CUSTOMER {customer_id}")
-    print(f"==================================================")
+def run_audit_committee(
+    profile: CustomerProfile,
+    xgb_score: float,
+    sanitized_notes: str,
+    quant_standing: str
+) -> dict:
+    """
+    Pure Multi-Agent Execution Unit.
+    Receives pre-fetched domain entity and calculated features, executes 
+    the 3 LLM agents sequentially, and returns structured results.
+    """
+    # 1. Format profile text from Domain Entity (No DB calls!)
+    profile_summary = (
+        f"Customer ID: {profile.customer_id}\n"
+        f"Name: {profile.name}\n"
+        f"Credit Score: {profile.credit_score}\n"
+        f"DTI Ratio: {profile.dti:.2f}\n"
+        f"Annual Income: ${profile.income:,.2f}\n"
+        f"Loan Requested: ${profile.loan_amount:,.2f}\n"
+        f"Delinquencies (2 yrs): {profile.delinquencies}"
+    )
 
-    # 1. Fetch Data via Agent Tools
-    profile = get_customer_financial_profile(customer_id)
-    notes = get_sanitized_customer_notes(customer_id)
+    # 2. Agent 1: Quantitative Risk Analyst
+    quant_res = quant_agent.invoke({
+        "profile_data": profile_summary,
+        "xgb_score": f"{xgb_score:.2%}",
+        "quant_standing": quant_standing
+    })
 
-    # 2. Step 1: Run Quantitative Analyst
-    print("\n[Agent 1] Quantitative Risk Analyst thinking...")
-    quant_res = quant_agent.invoke({"profile_data": profile})
-    print("\n--- Quantitative Report ---")
-    print(quant_res.content)
+    # 3. Agent 2: Qualitative Audit Specialist
+    qual_res = qual_agent.invoke({
+        "customer_notes": sanitized_notes if sanitized_notes else "No notes provided."
+    })
 
-    # 3. Step 2: Run Qualitative Auditor
-    print("\n[Agent 2] Qualitative Audit Agent analyzing notes...")
-    qual_res = qual_agent.invoke({"customer_notes": notes})
-    print("\n--- Qualitative Report ---")
-    print(qual_res.content)
-
-    # 4. Step 3: Run CRO Decision Agent
-    print("\n[Agent 3] Chief Risk Officer (CRO) synthesizing final decision...")
+    # 4. Agent 3: Chief Risk Officer (Synthesizer)
     cro_res = cro_agent.invoke({
         "quant_report": quant_res.content,
         "qual_report": qual_res.content
     })
-    print("\n==================================================")
-    print("FINAL CRO EXECUTIVE DECISION REPORT")
-    print("==================================================")
-    print(cro_res.content)
+
+    return {
+        "quant_analysis": quant_res.content,
+        "qual_analysis": qual_res.content,
+        "cro_decision": cro_res.content
+    }
 
 
 if __name__ == "__main__":
-    # Test on Anchor Profile 101 (Alice Smith - High Risk Edge Case)
-    run_underwriting_pipeline(101)
+    # Isolated Agent Test using a mock domain entity
+    mock_profile = CustomerProfile(
+        customer_id=101,
+        name="Alice Smith",
+        credit_score=580,
+        dti=0.45,
+        income=55000.0,
+        loan_amount=15000.0,
+        delinquencies=2,
+        notes="Customer has 2 late payment(s) recorded in the last 24 months."
+    )
+
+    print("\n==================================================")
+    print("RUNNING ISOLATED MULTI-AGENT TEST")
+    print("==================================================")
+    
+    results = run_audit_committee(
+        profile=mock_profile,
+        xgb_score=0.68,
+        sanitized_notes=mock_profile.notes,
+        quant_standing="CRITICAL RISK"
+    )
+
+    print("\n--- Quantitative Report ---")
+    print(results["quant_analysis"])
+    
+    print("\n--- Qualitative Report ---")
+    print(results["qual_analysis"])
+    
+    print("\n--- CRO Final Decision ---")
+    print(results["cro_decision"])
