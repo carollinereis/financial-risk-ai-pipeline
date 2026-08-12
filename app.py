@@ -97,21 +97,7 @@ st.subheader("Multi-Agent Risk Audit Committee")
 if st.button("Run AI Underwriting Audit Committee", type="primary", use_container_width=True):
     with st.spinner("Running 3-Agent Llama 3 Pipeline..."):
         # 1. Map raw DuckDB dictionary into CustomerProfile Domain Entity
-        customer_entity = CustomerProfile(
-            customer_id=profile["customer_id"],
-            name=profile["full_name"],
-            credit_score=(profile["credit_score"]),
-            dti=float(profile["debt_to_income_ratio"]),
-            income=float(profile["annual_income"]),
-            loan_amount=float(profile["loan_amount_requested"]),
-            delinquencies=int(profile["delinquencies_2yrs"]),
-            cpf=profile.get("cpf"),
-            email=profile.get("email"),
-            phone_number=profile.get("phone_number"),
-            employment_length_years=profile.get("employment_length_years"),
-            is_high_risk=bool(profile.get("is_high_risk", False)),
-            notes=notes,
-        )
+        customer_entity = CustomerProfile.from_db_record(profile)
 
         # 2. Compute Quantitative Standing via Domain Policy
         quant_standing = UnderwritingPolicy.evaluate_quantitative_standing(
