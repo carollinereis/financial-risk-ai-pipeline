@@ -1,14 +1,7 @@
 import re
-import sys
-from pathlib import Path
 
-# 1. Path resolution MUST be at the very top before importing local modules
-project_root = Path(__file__).resolve().parent.parent
-if str(project_root) not in sys.path:
-    sys.path.append(str(project_root))
-
-from src.database import get_db_connection
-
+from src.infra.config import ENABLE_PII_MASKING
+from src.infra.database.database import get_db_connection
 
 def sanitize_input(text: str) -> str:
     """Strips potential prompt injection characters/tags and attack phrases from text."""
@@ -66,23 +59,27 @@ def get_sanitized_customer_data(customer_id: int) -> dict:
     """Fetches customer record from DuckDB, sanitizes notes, and masks PII."""
     with get_db_connection() as conn:
         result = conn.execute("""
-            SELECT customer_id, full_name, cpf, email, phone_number, underwriter_notes, risk_score
-            FROM customers WHERE customer_id = ?
+            SELECT customer_id, full_name, cpf, email, phone_number, underwriter_notes, credit_score, debt_to_income_ratio
+            FROM customers 
+            WHERE customer_id = ?
         """, [customer_id]).fetchone()
 
     if not result:
         return {}
 
-    return {
+    # Map query tuple to dictionary
+    data = {
         "customer_id": result[0],
         "full_name": result[1],
         "cpf": mask_cpf(result[2]),
         "email": mask_email(result[3]),
         "phone_number": mask_phone(result[4]),
-        "underwriter_notes": sanitize_input(result[5]),
-        "risk_score": result[6],
+        "underwriter_notes": sanitize_input(result[5]) if result[5] else "",
+        "credit_score": result[6],
+        "dti": result[7],
     }
 
+    return data 
 
 if __name__ == "__main__":
     print("\n==================================================")
@@ -96,7 +93,7 @@ if __name__ == "__main__":
     for c_id in anchor_ids:
         sample = get_sanitized_customer_data(c_id)
         if sample:
-            print(f"ID {sample['customer_id']} | {sample['full_name']:<15} | CPF: {sample['cpf']:<15} | Email: {sample['email']:<25} | Score: {sample['risk_score']:.2f}")
+            print(f"ID {sample['customer_id']} | {sample['full_name']:<15} | CPF: {sample['cpf']:<15} | Email: {sample['email']:<25} | Score: {sample['credit_score']}")
         else:
             print(f"Customer ID {c_id} not found!")
 

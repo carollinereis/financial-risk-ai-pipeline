@@ -4,9 +4,9 @@ import duckdb
 import pandas as pd
 from xgboost import XGBClassifier
 
-from src.config import DUCKDB_PATH, MODEL_PATH
-from src.credit_risk_model import FEATURE_COLUMNS, CreditRiskModel
-from src.security import mask_cpf, mask_email, sanitize_input
+from src.infra.config import DUCKDB_PATH, MODEL_PATH
+from src.infra.ml.credit_risk_model import FEATURE_COLUMNS, CreditRiskModel
+from src.infra.security.security import mask_cpf, mask_email, sanitize_input
 
 # ------------------------------------------------------------------
 # Module-level Model Caching (Loaded ONCE on module import)
@@ -27,8 +27,17 @@ def _predict_live_risk(record: Dict[str, Any]) -> float:
         [[record[column] for column in FEATURE_COLUMNS]],
         columns=FEATURE_COLUMNS,
     )
-    proba = _MODEL.predict_proba(features)[0][1]
-    return round(float(proba), 4)
+    proba = _MODEL.predict_proba(features)
+
+    # 2. Extract scalar value safely depending on return shape
+    if hasattr(proba, "item"):
+        proba_val = proba.item()  # Works for numpy scalars/0D/1D single-element arrays
+    elif isinstance(proba, (list, tuple)):
+        proba_val = proba[0]
+    else:
+        proba_val = proba
+
+    return round(float(proba_val), 4)
 
 
 # ------------------------------------------------------------------
@@ -56,10 +65,16 @@ def get_customer_financial_profile(customer_id: int) -> Dict[str, Any]:
 
     # Compute live inference score
     try:
-        record["live_xgb_risk_score"] = _predict_live_risk(record)
+        record["live_xgb_risk_score"] = float(_predict_live_risk(record))
     except Exception as e:
         # Fallback to static stored score if live inference fails
-        record["live_xgb_risk_score"] = record.get("risk_score", f"Error: {e}")
+        fallback_score = record.get("risk_score", 0.0)
+        try:
+            record["live_xgb_risk_score"] = float(fallback_score)
+        except (TypeError, ValueError):
+            record["live_xgb_risk_score"] = 0.0
+        # Optional: keep the error message separately instead of overwriting the score
+        record["live_xgb_risk_score_error"] = str(e)
 
     return record
 

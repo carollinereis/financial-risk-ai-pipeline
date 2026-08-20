@@ -1,14 +1,8 @@
-import sys
 from pathlib import Path
 from datetime import datetime
 
-# Ensure root path resolution
-project_root = Path(__file__).resolve().parent.parent
-if str(project_root) not in sys.path:
-    sys.path.append(str(project_root))
-
-from src.database import get_db_connection, bulk_update_risk_scores, init_db
-from src.credit_risk_model import CreditRiskModel, HIGH_RISK_THRESHOLD, MODEL_VERSION
+from src.infra.database.database import get_db_connection, bulk_update_risk_scores, init_db
+from src.infra.ml.credit_risk_model import CreditRiskModel, HIGH_RISK_THRESHOLD, MODEL_VERSION
 
 def run_training_pipeline():
     init_db()
