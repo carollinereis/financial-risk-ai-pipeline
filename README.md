@@ -1,4 +1,4 @@
-# Financial Risk AI Pipeline & Governance Dashboard
+# Financial Risk AI Pipeline 
 
 This project was born out of curiosity about how to build an end-to-end platform using generative AI and machine learning inside financial institutions.
 
