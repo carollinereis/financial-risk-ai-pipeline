@@ -22,17 +22,7 @@ class RunRiskAuditUseCase:
         raw_notes = fetch_customer_notes(customer_id)
 
         # 2. Map raw DB dict -> Domain Entity
-        profile = CustomerProfile(
-            customer_id=customer["customer_id"],
-            name=customer["full_name"],
-            credit_score=customer["credit_score"],
-            dti=customer["debt_to_income_ratio"],
-            income=customer["annual_income"],
-            loan_amount=customer["loan_amount_requested"],
-            delinquencies=customer["delinquencies_2yrs"],
-            employment_length_years=customer.get("employment_length_years"),
-            notes=raw_notes,
-        )
+        profile = CustomerProfile.from_db_record(customer, notes=raw_notes)
 
         # 3. Sanitize unstructured text inputs
         sanitized_notes = sanitize_input(profile.notes) if profile.notes else ""
