@@ -1,16 +1,30 @@
-# React + Vite
+# Financial Risk AI Pipeline — Governance Dashboard (Frontend)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+This directory contains the user interface for the Financial Risk AI Pipeline, built using **React** and **Vite**.
 
-Currently, two official plugins are available:
+> **Note:** The current implementation serves as a functional MVP built to test live API integrations, multi-agent audit executions, and human-in-the-loop (HITL) overrides. Enhanced UI designs, design systems, and data visualization components are actively in development.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Quick Start
 
-## React Compiler
+1. **Install Dependencies**
+   ```bash
+   npm install
+   ```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+2. **Run Development Server**
+    ```bash
+    npm run dev
+    ```
+The application will be available at `http://localhost:5173.`
 
-## Expanding the Oxlint configuration
+## Features (Current MVP)
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+***Customer Selector:** Connects to FastAPI to load customer financial profiles.
+Live Risk Audit: Triggers the 3-agent committee (Quant, Qual, CRO) and renders decisions in real time.
+
+**Underwriter Override:** Sends manual decision overrides back to the database.
+
+## Tech Stack
+
+**Core:** React 18, Vite
+**HTTP Client:** Fetch API / Axios
