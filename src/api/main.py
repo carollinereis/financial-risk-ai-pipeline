@@ -1,4 +1,5 @@
 import duckdb
+from contextlib import asynccontextmanager
 from typing import List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,10 +24,19 @@ from src.infra.database.database import (
     get_write_connection
 )
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Ensures portfolio extension tables exist and seed data is loaded."""
+    init_portfolio_tables()
+    seed_sample_agent_analytics()
+    yield
+
+
 app = FastAPI(
     title="Financial Risk AI Pipeline API",
     description="Backend service exposing ML risk scores and Multi-Agent Audit evaluations.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Enable CORS for Vite dev server (and local testing)
@@ -37,14 +47,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# --- Database Startup Initialization ---
-@app.on_event("startup")
-def startup_event():
-    """Ensures portfolio extension tables exist and seed data is loaded."""
-    init_portfolio_tables()
-    seed_sample_agent_analytics()
-
 
 # --- Pydantic Schemas for Dashboard Actions ---
 class HumanOverrideRequest(BaseModel):
@@ -94,8 +96,6 @@ def run_audit(customer_id: int):
     try:
         use_case = RunRiskAuditUseCase()
         result = use_case.execute(customer_id)
-        # Print the raw object output to your terminal log
-        print("DEBUG AUDIT RESULT:", result)
 
         # execute() returns a typed AuditResult, so read its attributes directly.
         # Pydantic validates the types at the response boundary.
