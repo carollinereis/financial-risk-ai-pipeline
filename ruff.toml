@@ -1,0 +1,21 @@
+# Ruff config for the financial-risk-ai-pipeline.
+# Lint:   ruff check .
+# Format: ruff format .
+
+target-version = "py312"
+line-length = 100
+exclude = ["venv", ".venv", "frontend", "notes"]
+
+[lint]
+# E/W pycodestyle, F pyflakes, I isort, B bugbear, UP pyupgrade, SIM simplify
+select = ["E", "W", "F", "I", "B", "UP", "SIM"]
+ignore = [
+    "E501",  # line length is handled by the formatter
+]
+
+[lint.per-file-ignores]
+# Modules keep `if __name__ == "__main__":` smoke-test blocks with local imports.
+"src/infra/**/*.py" = ["E402"]
+
+[format]
+quote-style = "double"

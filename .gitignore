@@ -240,3 +240,5 @@ venv/
 
 # Local environment variables / secrets
 .env
+# Claude Code personal instructions
+CLAUDE.local.md
