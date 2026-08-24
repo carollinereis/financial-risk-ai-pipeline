@@ -13,7 +13,7 @@ def sanitize_input(text: str) -> str:
 
     # 2. Strip known prompt injection command patterns
     injection_patterns = [
-        r"(?i)ignore\s+(all\s+|previous\s+|prior\s+)?instructions.*",
+        r"(?i)ignore\s+(?:all\s+|previous\s+|prior\s+|the\s+|above\s+)*instructions.*",
         r"(?i)system\s+prompt.*",
         r"(?i)override\s+(decision|rules).*",
         r"(?i)and\s+return\s+approved.*",
@@ -52,7 +52,9 @@ def mask_phone(phone: str) -> str:
     """Masks phone number (e.g., +55 11 *****-4321)."""
     if not phone or not isinstance(phone, str):
         return "+55 ** *****-****"
-    return re.sub(r"(\+?\d{2}\s?\d{2}\s?)\d{5}(-\d{4})", r"\1*****\2", phone)
+    # Fail closed: an unrecognized format must not be returned in the clear.
+    output = re.sub(r"(\+?\d{2}\s?\d{2}\s?)\d{5}(-\d{4})", r"\1*****\2", phone)
+    return output if output != phone else "+55 ** *****-****"
 
 
 def get_sanitized_customer_data(customer_id: int) -> dict:
