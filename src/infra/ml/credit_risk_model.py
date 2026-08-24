@@ -1,21 +1,22 @@
 from pathlib import Path
+
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from xgboost import XGBClassifier
-from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.metrics import classification_report, roc_auc_score
+from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
+from xgboost import XGBClassifier
 
 from src.domain.entities import CustomerProfile
-from src.infra.config import MODEL_PATH 
+from src.infra.config import MODEL_PATH
 from src.infra.database.database import get_db_connection
 
 # Configuration Constants
 FEATURE_COLUMNS = [
-    "annual_income", 
-    "credit_score", 
+    "annual_income",
+    "credit_score",
     "debt_to_income_ratio",
-    "delinquencies_2yrs", 
-    "loan_amount_requested", 
+    "delinquencies_2yrs",
+    "loan_amount_requested",
     "employment_length_years"
 ]
 RANDOM_STATE = 42
@@ -118,7 +119,7 @@ class CreditRiskModel:
 
         # Build 1-row DataFrame aligned with exact FEATURE_COLUMNS order
         features_df = pd.DataFrame([feature_dict])[FEATURE_COLUMNS]
-        
+
         # Predict probability for positive class (Default / High Risk = 1)
         prob = self.predict_proba(features_df)[0]
         return float(prob)
@@ -139,7 +140,7 @@ class CreditRiskModel:
             raise FileNotFoundError(
                 f"Model file not found at {model_path}. Run training script first."
             )
-        
+
         instance = cls()
         instance.model.load_model(str(model_path))
         return instance
@@ -149,13 +150,13 @@ if __name__ == "__main__":
     # Script execution flow for model training
     model = CreditRiskModel()
     raw_df = model.load_data()
-    
+
     X = model.prepare_features(raw_df)
     y = model.prepare_labels(raw_df)
-    
+
     model.evaluate(X, y)
     model.cross_validate(X, y)
-    
+
     print("\nFitting final model on full dataset...")
     model.train(X, y)
     model.save_model()

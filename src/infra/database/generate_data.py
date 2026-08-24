@@ -1,4 +1,5 @@
 import random
+
 import pandas as pd
 from faker import Faker
 
@@ -40,7 +41,7 @@ def compute_default_probability(row: dict) -> float:
 def generate_underwriter_note(delinquencies: int, credit_score: int, dti: float) -> str:
     """Generates realistic notes aligned with quantitative metrics."""
     notes = []
-    
+
     # Red Flag notes tied to quantitative data
     if delinquencies > 0:
         notes.append(f"Customer has {delinquencies} late payment(s) recorded in the last 24 months.")
@@ -48,13 +49,13 @@ def generate_underwriter_note(delinquencies: int, credit_score: int, dti: float)
         notes.append("Recent score drop due to high revolving credit usage.")
     if dti > 0.40:
         notes.append("High debt-to-income ratio indicates limited monthly cash buffer.")
-        
+
     # Positive Signal notes tied to quantitative data
     if credit_score >= 750 and delinquencies == 0:
         notes.append("Excellent payment history with consistent automated payments.")
     if dti < 0.20:
         notes.append("Strong income stability and low financial leverage.")
-        
+
     return " ".join(notes) if notes else "Standard profile, no significant behavioral flags."
 
 FIRST_NAMES = ["James", "Mary", "John", "Patricia", "Robert", "Jennifer", "Michael", "Linda", "David", "Elizabeth", "Carlos", "Ana"]
@@ -66,59 +67,59 @@ def generate_synthetic_customers(num_records=100) -> pd.DataFrame:
     # 1. Force Anchor Test Profiles
     anchors = [
         {
-            "customer_id": 101, 
-            "full_name": "Alice Smith", 
-            "cpf": "123.456.789-00", 
-            "email": "alice.smith@example.com", 
-            "phone_number": "+55 11 98765-4321", 
-            "credit_score": 580, 
-            "debt_to_income_ratio": 0.45, 
-            "delinquencies_2yrs": 2, 
-            "annual_income": 55000, 
-            "loan_amount_requested": 15000, 
-            "employment_length_years": 2, 
+            "customer_id": 101,
+            "full_name": "Alice Smith",
+            "cpf": "123.456.789-00",
+            "email": "alice.smith@example.com",
+            "phone_number": "+55 11 98765-4321",
+            "credit_score": 580,
+            "debt_to_income_ratio": 0.45,
+            "delinquencies_2yrs": 2,
+            "annual_income": 55000,
+            "loan_amount_requested": 15000,
+            "employment_length_years": 2,
             "is_high_risk": 1
         },
         {
-            "customer_id": 102, 
-            "full_name": "Bob Jones", 
-            "cpf": "987.654.321-11", 
-            "email": "bob.jones@example.com", 
-            "phone_number": "+55 11 91234-5678", 
-            "credit_score": 820, 
-            "debt_to_income_ratio": 0.15, 
-            "delinquencies_2yrs": 0, 
-            "annual_income": 120000, 
-            "loan_amount_requested": 20000, 
-            "employment_length_years": 8, 
+            "customer_id": 102,
+            "full_name": "Bob Jones",
+            "cpf": "987.654.321-11",
+            "email": "bob.jones@example.com",
+            "phone_number": "+55 11 91234-5678",
+            "credit_score": 820,
+            "debt_to_income_ratio": 0.15,
+            "delinquencies_2yrs": 0,
+            "annual_income": 120000,
+            "loan_amount_requested": 20000,
+            "employment_length_years": 8,
             "is_high_risk": 0
         },
         {
-            "customer_id": 103, 
-            "full_name": "Carlos Silva", 
-            "cpf": "111.222.333-44", 
-            "email": "carlos.silva@example.com", 
-            "phone_number": "+55 21 99887-7665", 
-            "credit_score": 510, 
-            "debt_to_income_ratio": 0.58, 
-            "delinquencies_2yrs": 3, 
-            "annual_income": 42000, 
-            "loan_amount_requested": 25000, 
-            "employment_length_years": 1, 
+            "customer_id": 103,
+            "full_name": "Carlos Silva",
+            "cpf": "111.222.333-44",
+            "email": "carlos.silva@example.com",
+            "phone_number": "+55 21 99887-7665",
+            "credit_score": 510,
+            "debt_to_income_ratio": 0.58,
+            "delinquencies_2yrs": 3,
+            "annual_income": 42000,
+            "loan_amount_requested": 25000,
+            "employment_length_years": 1,
             "is_high_risk": 1
         },
         {
-            "customer_id": 104, 
-            "full_name": "Diana Prince", 
-            "cpf": "555.666.777-88", 
-            "email": "diana.prince@example.com", 
-            "phone_number": "+55 31 97766-5544", 
-            "credit_score": 790, 
-            "debt_to_income_ratio": 0.10, 
-            "delinquencies_2yrs": 0, 
-            "annual_income": 95000, 
-            "loan_amount_requested": 10000, 
-            "employment_length_years": 5, 
+            "customer_id": 104,
+            "full_name": "Diana Prince",
+            "cpf": "555.666.777-88",
+            "email": "diana.prince@example.com",
+            "phone_number": "+55 31 97766-5544",
+            "credit_score": 790,
+            "debt_to_income_ratio": 0.10,
+            "delinquencies_2yrs": 0,
+            "annual_income": 95000,
+            "loan_amount_requested": 10000,
+            "employment_length_years": 5,
             "is_high_risk": 0
         },
     ]
@@ -132,7 +133,7 @@ def generate_synthetic_customers(num_records=100) -> pd.DataFrame:
         first_name = random.choice(FIRST_NAMES)
         last_name = random.choice(LAST_NAMES)
         full_name = f"{first_name} {last_name}"
-        
+
         email = f"{first_name.lower()}.{last_name.lower()}{random.randint(10,99)}@example.com"
         cpf = generate_cpf()
         phone_number = f"+55 {random.choice([11, 21, 31, 41, 51])} 9{random.randint(1000,9999)}-{random.randint(1000,9999)}"

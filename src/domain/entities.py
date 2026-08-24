@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Any
 
 
 @dataclass
@@ -11,15 +11,15 @@ class CustomerProfile:
     income: float
     loan_amount: float
     delinquencies: int
-    cpf: Optional[str] = None
-    email: Optional[str] = None
-    phone_number: Optional[str] = None
-    employment_length_years: Optional[int] = None
-    is_high_risk: Optional[bool] = False
-    notes: Optional[str] = None
+    cpf: str | None = None
+    email: str | None = None
+    phone_number: str | None = None
+    employment_length_years: int | None = None
+    is_high_risk: bool | None = False
+    notes: str | None = None
 
     @classmethod
-    def from_db_record(cls, record: dict, notes: Optional[str] = None) -> "CustomerProfile":
+    def from_db_record(cls, record: dict, notes: str | None = None) -> "CustomerProfile":
         """Factory method to construct entity directly from DB query record."""
         return cls(
             customer_id=record["customer_id"],
@@ -53,8 +53,8 @@ class AuditResult:
     quant_report: str
     qual_report: str
     cro_report: str
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "customer_id": self.customer_id,
             "risk_score": self.risk_score,

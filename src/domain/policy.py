@@ -1,6 +1,6 @@
 class UnderwritingPolicy:
     """Encodes non-negotiable commercial banking risk thresholds."""
-    
+
     MIN_CREDIT_SCORE = 620
     MAX_DTI = 0.40
     XGB_HIGH_RISK_THRESHOLD = 0.50

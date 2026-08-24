@@ -1,7 +1,7 @@
 from src.domain.entities import AuditResult, CustomerProfile
 from src.domain.policy import UnderwritingPolicy
 from src.infra.agents.agents import run_audit_committee
-from src.infra.config import DUCKDB_PATH, MODEL_PATH
+from src.infra.config import MODEL_PATH
 from src.infra.database.database import fetch_customer_by_id, fetch_customer_notes
 from src.infra.ml.credit_risk_model import CreditRiskModel
 from src.infra.security.security import sanitize_input

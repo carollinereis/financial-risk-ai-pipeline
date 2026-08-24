@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 
 import duckdb
 import pandas as pd
@@ -18,7 +18,7 @@ except Exception as e:
     print(f"[Warning] Could not load model from {MODEL_PATH}: {e}")
 
 
-def _predict_live_risk(record: Dict[str, Any]) -> float:
+def _predict_live_risk(record: dict[str, Any]) -> float:
     """Helper: Runs live XGBoost inference using all training features."""
     if _MODEL is None:
         raise ValueError("ML Model is not loaded.")
@@ -43,7 +43,7 @@ def _predict_live_risk(record: Dict[str, Any]) -> float:
 # ------------------------------------------------------------------
 # Public Agent Tools
 # ------------------------------------------------------------------
-def get_customer_financial_profile(customer_id: int) -> Dict[str, Any]:
+def get_customer_financial_profile(customer_id: int) -> dict[str, Any]:
     """Fetches raw financial data from DuckDB, recalculates live XGBoost prediction,
     and applies PII masking.
     """

@@ -2,13 +2,12 @@
 import duckdb
 import streamlit as st
 
-from src.infra.agents.agent_tools import (
-    get_customer_financial_profile, 
-    get_sanitized_customer_notes
-)
-
 from src.domain.entities import CustomerProfile
 from src.domain.policy import UnderwritingPolicy
+from src.infra.agents.agent_tools import (
+    get_customer_financial_profile,
+    get_sanitized_customer_notes,
+)
 from src.infra.agents.agents import run_audit_committee
 from src.infra.config import DUCKDB_PATH
 
@@ -75,9 +74,9 @@ with col4:
     except (TypeError, ValueError):
         xgb_score = 0.0
     st.metric(
-        "XGBoost Risk Score", 
-        f"{xgb_score:.4f}", 
-        delta="High Default Risk" if xgb_score > 0.5 else "Low Risk", 
+        "XGBoost Risk Score",
+        f"{xgb_score:.4f}",
+        delta="High Default Risk" if xgb_score > 0.5 else "Low Risk",
         delta_color="inverse",
     )
 
@@ -108,7 +107,7 @@ if st.button("Run AI Underwriting Audit Committee", type="primary", use_containe
 
         # 3. Call Orchestrator Function (returns a dict with keys: 'quant_report', 'qual_report', 'cro_report')
         audit_results = run_audit_committee(
-            profile=customer_entity,  
+            profile=customer_entity,
             sanitized_notes=notes,
             xgb_score=xgb_score,
             quant_standing=quant_standing
@@ -119,15 +118,15 @@ if st.button("Run AI Underwriting Audit Committee", type="primary", use_containe
     # Render Results in Tabs
     tab1, tab2, tab3 = st.tabs(
         [
-            "🏛️ CRO Executive Decision", 
-            "📊 Quantitative Report", 
+            "🏛️ CRO Executive Decision",
+            "📊 Quantitative Report",
             "🔍 Qualitative Audit"
         ]
     )
 
     with tab1:
         st.markdown("### Final Executive Decision")
-        
+
         cro_text = audit_results.get("cro_decision", "")
         if "REJECTED" in cro_text.upper():
             st.error("🔴 **FINAL DECISION: REJECTED**")
@@ -135,7 +134,7 @@ if st.button("Run AI Underwriting Audit Committee", type="primary", use_containe
             st.success("🟢 **FINAL DECISION: APPROVED**")
         else:
             st.warning("🟡 **FINAL DECISION: MANUAL REVIEW REQUIRED**")
-            
+
         st.markdown(cro_text)
 
     with tab2:
@@ -145,4 +144,3 @@ if st.button("Run AI Underwriting Audit Committee", type="primary", use_containe
     with tab3:
         st.markdown("### Qualitative & Behavioral Audit Insights")
         st.write(audit_results.get("qual_analysis", ""))
-        

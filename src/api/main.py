@@ -1,28 +1,25 @@
-import duckdb
 from contextlib import asynccontextmanager
-from typing import List
+
+import duckdb
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from src.infra.config import DUCKDB_PATH
+from src.api.schemas import AuditResultResponse, CustomerListItem, CustomerProfileResponse
+from src.application.run_risk_audit import RunRiskAuditUseCase
 from src.infra.agents.agent_tools import (
     get_customer_financial_profile,
-    get_sanitized_customer_notes
+    get_sanitized_customer_notes,
 )
-from src.application.run_risk_audit import RunRiskAuditUseCase
-from src.api.schemas import (
-    CustomerListItem,
-    CustomerProfileResponse,
-    AuditResultResponse
-)
+from src.infra.config import DUCKDB_PATH
 from src.infra.database.database import (
+    fetch_agent_divergence,
+    fetch_executive_kpis,
+    get_write_connection,
     init_portfolio_tables,
     seed_sample_agent_analytics,
-    fetch_executive_kpis,
-    fetch_agent_divergence,
-    get_write_connection
 )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -53,7 +50,7 @@ class HumanOverrideRequest(BaseModel):
     status: str  # e.g., 'APPROVED' or 'REJECTED'
     rationale: str
 
-@app.get("/customers", response_model=List[CustomerListItem])
+@app.get("/customers", response_model=list[CustomerListItem])
 def list_customers():
     """Fetch available customer list for dropdown selection."""
     try:
@@ -70,9 +67,9 @@ def get_customer_profile(customer_id: int):
     profile = get_customer_financial_profile(customer_id)
     if not profile or "error" in profile:
         raise HTTPException(status_code=404, detail=f"Customer ID {customer_id} not found.")
-    
+
     notes = get_sanitized_customer_notes(customer_id)
-    
+
     # Standardize output to match schema
     return CustomerProfileResponse(
         customer_id=profile["customer_id"],
@@ -109,7 +106,7 @@ def run_audit(customer_id: int):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Audit execution error: {str(e)}")
-    
+
 # --- Executive Dashboard & AI Ops Endpoints ---
 @app.get("/api/dashboard/kpis")
 def get_dashboard_kpis():
@@ -139,7 +136,7 @@ def override_human_decision(application_id: int, payload: HumanOverrideRequest):
                 SET decision_status = ? 
                 WHERE application_id = ?
             """, [payload.status, application_id])
-            
+
         return {
             "message": "Decision successfully updated",
             "application_id": application_id,

@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional
 
 import duckdb
 import pandas as pd
@@ -39,7 +38,7 @@ def init_db() -> None:
     print(f"√ DuckDB initialized and populated with {count} records from '{CSV_PATH.name}'.")
 
 
-def fetch_customer_by_id(customer_id: int) -> Optional[dict]:
+def fetch_customer_by_id(customer_id: int) -> dict | None:
     """Fetches a single customer record by ID as a dictionary."""
     with get_db_connection() as conn:
         result = conn.execute(
@@ -52,7 +51,7 @@ def fetch_customer_by_id(customer_id: int) -> Optional[dict]:
         columns = [desc[0] for desc in conn.description]
         return dict(zip(columns, result))
 
-def fetch_customer_notes(customer_id: int) -> Optional[str]:
+def fetch_customer_notes(customer_id: int) -> str | None:
     """Fetches the raw (unsanitized) underwriter notes for a single customer."""
     with get_db_connection() as conn:
         result = conn.execute(
@@ -162,7 +161,7 @@ def fetch_executive_kpis() -> dict:
             FROM loan_applications a;
         """
         res = conn.execute(kpi_query).fetchone()
-        
+
         time_query = "SELECT ROUND(AVG(execution_time_ms) / 1000.0, 2) FROM agent_evaluations;"
         avg_time = conn.execute(time_query).fetchone()[0] or 0.0
 

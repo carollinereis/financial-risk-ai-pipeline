@@ -1,5 +1,5 @@
-from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field
+
+from pydantic import BaseModel, ConfigDict
 
 
 # ------------------------------------------------------------------
@@ -21,11 +21,11 @@ class CustomerProfileResponse(BaseModel):
     annual_income: float
     loan_amount_requested: float
     delinquencies_2yrs: int
-    employment_length_years: Optional[int] = None
+    employment_length_years: int | None = None
     live_xgb_risk_score: float
-    cpf: Optional[str] = None       # Sanitized / Masked PII
-    email: Optional[str] = None     # Sanitized / Masked PII
-    sanitized_notes: Optional[str] = None
+    cpf: str | None = None       # Sanitized / Masked PII
+    email: str | None = None     # Sanitized / Masked PII
+    sanitized_notes: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

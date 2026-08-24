@@ -1,8 +1,10 @@
 import warnings
+
 warnings.filterwarnings("ignore", category=UserWarning)
 
-from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_ollama import ChatOllama
+
 from src.domain.entities import CustomerProfile
 
 # Initialize local Llama 3 model via Ollama (deterministic compliance)
@@ -156,7 +158,7 @@ if __name__ == "__main__":
     print("\n==================================================")
     print("RUNNING ISOLATED MULTI-AGENT TEST")
     print("==================================================")
-    
+
     results = run_audit_committee(
         profile=mock_profile,
         xgb_score=0.68,
@@ -166,9 +168,9 @@ if __name__ == "__main__":
 
     print("\n--- Quantitative Report ---")
     print(results["quant_analysis"])
-    
+
     print("\n--- Qualitative Report ---")
     print(results["qual_analysis"])
-    
+
     print("\n--- CRO Final Decision ---")
     print(results["cro_decision"])
