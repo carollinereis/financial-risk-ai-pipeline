@@ -2,6 +2,7 @@ import duckdb
 from typing import List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from src.infra.config import DUCKDB_PATH
 from src.infra.agents.agent_tools import (
@@ -14,6 +15,13 @@ from src.api.schemas import (
     CustomerProfileResponse,
     AuditResultResponse
 )
+from src.infra.database.database import (
+    init_portfolio_tables,
+    seed_sample_agent_analytics,
+    fetch_executive_kpis,
+    fetch_agent_divergence,
+    get_write_connection
+)
 
 app = FastAPI(
     title="Financial Risk AI Pipeline API",
@@ -24,12 +32,24 @@ app = FastAPI(
 # Enable CORS for Vite dev server (and local testing)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# --- Database Startup Initialization ---
+@app.on_event("startup")
+def startup_event():
+    """Ensures portfolio extension tables exist and seed data is loaded."""
+    init_portfolio_tables()
+    seed_sample_agent_analytics()
+
+
+# --- Pydantic Schemas for Dashboard Actions ---
+class HumanOverrideRequest(BaseModel):
+    status: str  # e.g., 'APPROVED' or 'REJECTED'
+    rationale: str
 
 @app.get("/customers", response_model=List[CustomerListItem])
 def list_customers():
@@ -74,20 +94,56 @@ def run_audit(customer_id: int):
     try:
         use_case = RunRiskAuditUseCase()
         result = use_case.execute(customer_id)
-        
-        # If result is an object/dataclass, read attributes; otherwise read dict keys
-        def get_val(obj, attr, default=""):
-            if isinstance(obj, dict):
-                return obj.get(attr, default)
-            return getattr(obj, attr, default)
+        # Print the raw object output to your terminal log
+        print("DEBUG AUDIT RESULT:", result)
 
+        # execute() returns a typed AuditResult, so read its attributes directly.
+        # Pydantic validates the types at the response boundary.
         return AuditResultResponse(
-            customer_id=customer_id,
-            quantitative_standing=str(get_val(result, "quant_standing", get_val(result, "quant_standing", "CRITICAL RISK"))),
-            xgb_risk_score=float(get_val(result, "xgb_score", get_val(result, "xgb_risk_score", 0.0))),
-            cro_decision=str(get_val(result, "cro_report", get_val(result, "cro_decision", "No decision rendered."))),
-            quant_analysis=str(get_val(result, "quant_report", "")),
-            qual_analysis=str(get_val(result, "qual_report", ""))
+            customer_id=result.customer_id,
+            quantitative_standing=result.quant_standing,
+            xgb_risk_score=result.risk_score,
+            cro_decision=result.cro_report,
+            quant_analysis=result.quant_report,
+            qual_analysis=result.qual_report,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Audit execution error: {str(e)}")
+    
+# --- Executive Dashboard & AI Ops Endpoints ---
+@app.get("/api/dashboard/kpis")
+def get_dashboard_kpis():
+    """Fetch high-level executive KPIs for the top card grid."""
+    try:
+        return fetch_executive_kpis()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching executive KPIs: {str(e)}")
+
+
+@app.get("/api/dashboard/agent-analytics")
+def get_agent_analytics():
+    """Fetch AI agent consensus/divergence distributions for Recharts."""
+    try:
+        return fetch_agent_divergence()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching agent analytics: {str(e)}")
+
+
+@app.patch("/api/dashboard/override/{application_id}")
+def override_human_decision(application_id: int, payload: HumanOverrideRequest):
+    """Allows an underwriter to manually approve/reject flagged cases in the HITL queue."""
+    try:
+        with get_write_connection() as conn:
+            conn.execute("""
+                UPDATE loan_applications 
+                SET decision_status = ? 
+                WHERE application_id = ?
+            """, [payload.status, application_id])
+            
+        return {
+            "message": "Decision successfully updated",
+            "application_id": application_id,
+            "new_status": payload.status
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating decision: {str(e)}")
