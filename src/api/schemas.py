@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict
 class CustomerListItem(BaseModel):
     customer_id: int
     full_name: str
+    credit_score: int
+    risk_score: float | None = None
 
 
 # ------------------------------------------------------------------
@@ -40,3 +42,8 @@ class AuditResultResponse(BaseModel):
     cro_decision: str
     quant_analysis: str
     qual_analysis: str
+    # Structured verdict parsed from the CRO prose; additive, so existing
+    # consumers of the free-text fields keep working unchanged.
+    decision: str = "MANUAL REVIEW REQUIRED"
+    risk_tier: str = "HIGH"
+    qual_assessment: str = "MEDIUM"

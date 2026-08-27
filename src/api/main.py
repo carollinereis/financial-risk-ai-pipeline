@@ -7,16 +7,21 @@ from pydantic import BaseModel
 
 from src.api.schemas import AuditResultResponse, CustomerListItem, CustomerProfileResponse
 from src.application.run_risk_audit import RunRiskAuditUseCase
+from src.domain.policy import policy_reference
 from src.infra.agents.agent_tools import (
     get_customer_financial_profile,
     get_sanitized_customer_notes,
 )
 from src.infra.config import DUCKDB_PATH
 from src.infra.database.database import (
+    fetch_agent_consensus_stats,
     fetch_agent_divergence,
+    fetch_decision_distribution,
     fetch_executive_kpis,
-    get_write_connection,
+    fetch_hitl_exception_queue,
+    fetch_risk_profile_distribution,
     init_portfolio_tables,
+    record_human_override,
     seed_sample_agent_analytics,
 )
 
@@ -46,6 +51,11 @@ app.add_middleware(
 )
 
 # --- Pydantic Schemas for Dashboard Actions ---
+# Underwriters may only settle a case one of two ways; anything else is rejected
+# at the boundary so placeholder values can never reach decision_status.
+ALLOWED_OVERRIDE_STATUSES = {"APPROVED", "REJECTED"}
+
+
 class HumanOverrideRequest(BaseModel):
     status: str  # e.g., 'APPROVED' or 'REJECTED'
     rationale: str
@@ -55,10 +65,13 @@ def list_customers():
     """Fetch available customer list for dropdown selection."""
     try:
         with duckdb.connect(str(DUCKDB_PATH), read_only=True) as conn:
-            df = conn.execute("SELECT customer_id, full_name FROM customers ORDER BY customer_id").df()
+            df = conn.execute(
+                "SELECT customer_id, full_name, credit_score, risk_score "
+                "FROM customers ORDER BY customer_id"
+            ).df()
         return df.to_dict(orient="records")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}") from e
 
 
 @app.get("/customers/{customer_id}", response_model=CustomerProfileResponse)
@@ -103,9 +116,12 @@ def run_audit(customer_id: int):
             cro_decision=result.cro_report,
             quant_analysis=result.quant_report,
             qual_analysis=result.qual_report,
+            decision=result.decision,
+            risk_tier=result.risk_tier,
+            qual_assessment=result.qual_assessment,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Audit execution error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Audit execution error: {str(e)}") from e
 
 # --- Executive Dashboard & AI Ops Endpoints ---
 @app.get("/api/dashboard/kpis")
@@ -114,7 +130,7 @@ def get_dashboard_kpis():
     try:
         return fetch_executive_kpis()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching executive KPIs: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching executive KPIs: {str(e)}") from e
 
 
 @app.get("/api/dashboard/agent-analytics")
@@ -123,24 +139,75 @@ def get_agent_analytics():
     try:
         return fetch_agent_divergence()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching agent analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching agent analytics: {str(e)}") from e
+
+
+@app.get("/api/dashboard/agent-consensus")
+def get_agent_consensus():
+    """Fetch unanimous vs divergent split driving the HITL exception workload."""
+    try:
+        return fetch_agent_consensus_stats()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching agent consensus: {str(e)}") from e
+
+
+@app.get("/api/dashboard/policy-reference")
+def get_policy_reference():
+    """Serves the enforced underwriting thresholds and the committee's policy list."""
+    try:
+        return policy_reference()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching policy reference: {str(e)}") from e
+
+
+@app.get("/api/dashboard/decision-distribution")
+def get_decision_distribution():
+    """Fetch the portfolio outcome split (approved/rejected/manual review) for the donut."""
+    try:
+        return fetch_decision_distribution()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching decision distribution: {str(e)}") from e
+
+
+@app.get("/api/dashboard/hitl-queue")
+def get_hitl_queue():
+    """Fetch applications where the agent committee disagreed, pending human review."""
+    try:
+        return fetch_hitl_exception_queue()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching HITL queue: {str(e)}") from e
+
+
+@app.get("/api/dashboard/risk-profile")
+def get_risk_profile():
+    """Fetch portfolio rating bands, DTI-vs-default scatter, and delinquency matrix."""
+    try:
+        return fetch_risk_profile_distribution()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching risk profile: {str(e)}") from e
 
 
 @app.patch("/api/dashboard/override/{application_id}")
 def override_human_decision(application_id: int, payload: HumanOverrideRequest):
     """Allows an underwriter to manually approve/reject flagged cases in the HITL queue."""
+    status = payload.status.strip().upper()
+    if status not in ALLOWED_OVERRIDE_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid status '{payload.status}'. Expected one of: {sorted(ALLOWED_OVERRIDE_STATUSES)}.",
+        )
+
+    rationale = payload.rationale.strip()
+    if not rationale:
+        raise HTTPException(status_code=422, detail="An override rationale is required for the audit trail.")
+
     try:
-        with get_write_connection() as conn:
-            conn.execute("""
-                UPDATE loan_applications 
-                SET decision_status = ? 
-                WHERE application_id = ?
-            """, [payload.status, application_id])
+        record_human_override(application_id, status, rationale)
 
         return {
             "message": "Decision successfully updated",
             "application_id": application_id,
-            "new_status": payload.status
+            "new_status": status
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error updating decision: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error updating decision: {str(e)}") from e
