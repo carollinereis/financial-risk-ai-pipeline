@@ -69,7 +69,9 @@ function App() {
 
       <KPICards
         kpis={{
-          total: kpis.total_applications,
+          total: kpis.total_customers,
+          analyzed: kpis.analyzed_customers,
+          totalApplications: kpis.total_applications,
           avgScore,
           approvalRate: kpis.approval_rate_pct,
           avgTime: kpis.avg_decision_time_sec,

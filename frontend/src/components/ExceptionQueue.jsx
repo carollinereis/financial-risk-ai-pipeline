@@ -15,6 +15,11 @@ const OVERRIDE_ACTIONS = [
   { status: 'REJECTED', label: 'Reject' },
 ];
 
+// The name is kept for the session so working a queue does not mean retyping a
+// signature per row. It is self-declared — the dashboard has no authentication,
+// so this attributes an override without authenticating it.
+const UNDERWRITER_KEY = 'underwriter-name';
+
 const currency = (value) =>
   `$${(value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
@@ -22,10 +27,18 @@ function VoteSummary({ votes = [] }) {
   return (
     <div style={tableStyles.votes}>
       {votes.map((vote) => (
-        <span key={`${vote.application_id}-${vote.agent_name}`} style={tableStyles.vote}>
-          <span style={tableStyles.voteAgent}>{vote.agent_name.replace(/ Agent$/, '')}</span>
-          <strong>{vote.decision}</strong>
-        </span>
+        <div key={`${vote.application_id}-${vote.agent_name}`}>
+          <span style={tableStyles.vote}>
+            <span style={tableStyles.voteAgent}>{vote.agent_name.replace(/ Agent$/, '')}</span>
+            <strong>{vote.decision}</strong>
+          </span>
+          {/* Deterministic policy can overrule an agent, leaving the vote at odds
+              with the agent's own prose. Saying why is the difference between a
+              guardrail and an apparent defect. */}
+          {vote.verdict_basis && (
+            <div style={tableStyles.voteBasis}>{vote.verdict_basis}</div>
+          )}
+        </div>
       ))}
     </div>
   );
@@ -37,6 +50,13 @@ export function ExceptionQueue({ onInspectCustomer, onDecisionRecorded, refreshK
   const [error, setError] = useState(null);
   const [draftId, setDraftId] = useState(null);
   const [draft, setDraft] = useState({ status: null, rationale: '' });
+  const [underwriter, setUnderwriter] = useState(() => {
+    try {
+      return localStorage.getItem(UNDERWRITER_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
 
@@ -88,11 +108,19 @@ export function ExceptionQueue({ onInspectCustomer, onDecisionRecorded, refreshK
       return;
     }
 
+    const signature = underwriter.trim();
+    // The API rejects an anonymous override; an audit trail without a name on it
+    // answers "what" but never "who", which is the question an auditor asks.
+    if (!signature) {
+      setSubmitError('An underwriter name is required so the override is attributable.');
+      return;
+    }
+
     setSubmitting(true);
     fetch(`${API_BASE}/api/dashboard/override/${applicationId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: draft.status, rationale }),
+      body: JSON.stringify({ status: draft.status, rationale, underwriter: signature }),
     })
       .then(async (res) => {
         if (!res.ok) {
@@ -103,6 +131,11 @@ export function ExceptionQueue({ onInspectCustomer, onDecisionRecorded, refreshK
       })
       .then(() => {
         setSubmitting(false);
+        try {
+          localStorage.setItem(UNDERWRITER_KEY, signature);
+        } catch {
+          // A locked-down browser costs a retype, never the ruling itself.
+        }
         cancelDraft();
         // Refetch rather than splice locally: the row leaves the queue because
         // the server stamped overridden_at, so the server is the authority.
@@ -178,6 +211,13 @@ export function ExceptionQueue({ onInspectCustomer, onDecisionRecorded, refreshK
                       <strong style={tableStyles.draftTitle}>
                         Override to {draft.status}
                       </strong>
+                      <input
+                        type="text"
+                        style={tableStyles.textarea}
+                        placeholder="Underwriter name (required)"
+                        value={underwriter}
+                        onChange={(e) => setUnderwriter(e.target.value)}
+                      />
                       <textarea
                         style={tableStyles.textarea}
                         rows={3}
@@ -296,6 +336,14 @@ const tableStyles = {
   voteAgent: {
     color: 'var(--text-secondary)',
     minWidth: '72px',
+  },
+  voteBasis: {
+    color: 'var(--text-secondary)',
+    fontSize: '10px',
+    lineHeight: 1.4,
+    marginLeft: '78px',
+    marginBottom: '4px',
+    maxWidth: '320px',
   },
   inspectBtn: {
     background: 'transparent',

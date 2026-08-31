@@ -130,9 +130,18 @@ def init_portfolio_tables():
             );
         """)
 
+        # How each verdict was reached. Deterministic policy can overrule an agent's
+        # own prose, and without this the stored vote contradicts the stored report
+        # with nothing to explain the gap.
+        conn.execute("ALTER TABLE agent_evaluations ADD COLUMN IF NOT EXISTS verdict_basis TEXT;")
+
         # Added after the initial schema; ALTER keeps pre-existing databases in step.
         conn.execute("ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS override_notes TEXT;")
         conn.execute("ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS overridden_at TIMESTAMP;")
+        # Self-declared underwriter identity. The dashboard has no authentication,
+        # so this attributes a ruling without authenticating it; treat it as a
+        # signature on the audit trail, not as proof of identity.
+        conn.execute("ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS overridden_by VARCHAR;")
 
 
 def seed_sample_agent_analytics():
@@ -181,6 +190,20 @@ def fetch_executive_kpis() -> dict:
         """
         weighted_risk = conn.execute(risk_query).fetchone()[0] or 0.0
 
+        # Every portfolio rate below is computed over applications that have been
+        # through the committee, which is a fraction of the roster. Both numbers
+        # ship so the dashboard can state the denominator instead of implying one.
+        coverage_query = """
+            SELECT
+                (SELECT COUNT(*) FROM customers) AS total_customers,
+                (SELECT COUNT(DISTINCT a.customer_id)
+                 FROM loan_applications a
+                 JOIN agent_evaluations e ON e.application_id = a.application_id
+                 JOIN customers c ON c.customer_id = a.customer_id
+                ) AS analyzed_customers;
+        """
+        coverage = conn.execute(coverage_query).fetchone()
+
         return {
             "total_applications": res[0] or 0,
             "total_approved": res[1] or 0,
@@ -188,7 +211,9 @@ def fetch_executive_kpis() -> dict:
             "total_requested_volume": float(res[3] or 0.0),
             "approved_volume": float(res[4] or 0.0),
             "avg_decision_time_sec": float(avg_time),
-            "weighted_avg_risk_score": float(weighted_risk)
+            "weighted_avg_risk_score": float(weighted_risk),
+            "total_customers": int(coverage[0] or 0),
+            "analyzed_customers": int(coverage[1] or 0),
         }
 
 
@@ -328,6 +353,7 @@ def fetch_hitl_exception_queue() -> list:
                 decision,
                 CAST(agent_score AS DOUBLE) AS agent_score,
                 rationale,
+                verdict_basis,
                 execution_time_ms
             FROM agent_evaluations
             WHERE application_id IN (
@@ -341,6 +367,11 @@ def fetch_hitl_exception_queue() -> list:
         # Single pass groups votes by application so the queue stays one round-trip.
         votes_by_application: dict[int, list] = {}
         for vote in votes:
+            # A NULL text column arrives from pandas as NaN, which is not valid JSON
+            # and fails the whole response at the serialisation boundary.
+            for nullable in ("verdict_basis", "rationale"):
+                if pd.isna(vote.get(nullable)):
+                    vote[nullable] = None
             votes_by_application.setdefault(int(vote["application_id"]), []).append(vote)
 
         for application in applications:
@@ -356,10 +387,10 @@ def fetch_hitl_exception_queue() -> list:
 # application" and "current standing" are the same record.
 LATEST_APPLICATION_CTE = """
     WITH latest_application AS (
-        SELECT application_id, customer_id, decision_status, overridden_at, created_at
+        SELECT application_id, customer_id, decision_status, overridden_at, overridden_by, created_at
         FROM (
             SELECT
-                application_id, customer_id, decision_status, overridden_at, created_at,
+                application_id, customer_id, decision_status, overridden_at, overridden_by, created_at,
                 ROW_NUMBER() OVER (
                     PARTITION BY customer_id ORDER BY created_at DESC, application_id DESC
                 ) AS recency_rank
@@ -388,9 +419,12 @@ def fetch_customer_registry() -> list:
                 a.application_id,
                 a.decision_status,
                 a.overridden_at IS NOT NULL AS human_overridden,
+                a.overridden_by,
                 e.cro_verdict,
                 e.last_analyzed_at,
-                e.agent_count
+                e.agent_count,
+                e.distinct_verdicts,
+                e.audit_risk_score
             FROM customers c
             LEFT JOIN latest_application a ON a.customer_id = c.customer_id
             LEFT JOIN (
@@ -398,7 +432,12 @@ def fetch_customer_registry() -> list:
                     application_id,
                     MAX(evaluated_at) AS last_analyzed_at,
                     COUNT(*) AS agent_count,
-                    MAX(CASE WHEN agent_name = 'CRO Decision Agent' THEN decision END) AS cro_verdict
+                    MAX(CASE WHEN agent_name = 'CRO Decision Agent' THEN decision END) AS cro_verdict,
+                    COUNT(DISTINCT decision) AS distinct_verdicts,
+                    -- The quant agent's score is the XGBoost probability frozen at audit
+                    -- time, persisted as a percentage; customers.risk_score is the live one.
+                    MAX(CASE WHEN agent_name = 'Quantitative Agent' THEN agent_score END)
+                        AS audit_risk_score
                 FROM agent_evaluations
                 GROUP BY application_id
             ) e ON e.application_id = a.application_id
@@ -418,8 +457,15 @@ def fetch_customer_registry() -> list:
         row["decision_status"] = None if pd.isna(row.get("decision_status")) else row["decision_status"]
         row["cro_verdict"] = None if pd.isna(row.get("cro_verdict")) else row["cro_verdict"]
         row["human_overridden"] = bool(row.get("human_overridden"))
+        row["overridden_by"] = None if pd.isna(row.get("overridden_by")) else row["overridden_by"]
         row["risk_score"] = None if pd.isna(row.get("risk_score")) else float(row["risk_score"])
+        # A split committee was settled by policy rather than consensus; the registry
+        # marks it so the exception queue is not the only place that fact appears.
+        row["committee_split"] = int(row.get("distinct_verdicts") or 0) > 1
+        audit_score = row.get("audit_risk_score")
+        row["audit_risk_score"] = None if pd.isna(audit_score) else float(audit_score) / 100.0
         row.pop("agent_count", None)
+        row.pop("distinct_verdicts", None)
 
     return rows
 
@@ -433,7 +479,8 @@ def fetch_saved_audit(customer_id: int) -> dict | None:
     with get_read_connection() as conn:
         application = conn.execute(
             """
-            SELECT application_id, decision_status, override_notes, overridden_at, created_at
+            SELECT application_id, decision_status, override_notes, overridden_at,
+                   overridden_by, created_at
             FROM loan_applications
             WHERE customer_id = ?
             ORDER BY created_at DESC, application_id DESC
@@ -453,7 +500,8 @@ def fetch_saved_audit(customer_id: int) -> dict | None:
                 CAST(agent_score AS DOUBLE) AS agent_score,
                 rationale,
                 execution_time_ms,
-                evaluated_at
+                evaluated_at,
+                verdict_basis
             FROM agent_evaluations
             WHERE application_id = ?
             ORDER BY agent_name
@@ -475,6 +523,8 @@ def fetch_saved_audit(customer_id: int) -> dict | None:
         "decision": application[1] or "MANUAL REVIEW REQUIRED",
         "human_overridden": application[3] is not None,
         "override_notes": application[2],
+        "overridden_by": application[4],
+        "overridden_at": str(application[3]) if application[3] is not None else None,
         "last_analyzed_at": str(max(row[5] for row in evaluations)),
         # Scores are persisted as percentages; the live audit response reports the
         # XGBoost probability on a 0-1 scale, so convert back for one shared shape.
@@ -485,20 +535,69 @@ def fetch_saved_audit(customer_id: int) -> dict | None:
         "quant_analysis": (quant[3] if quant else "") or "",
         "qual_analysis": (qual[3] if qual else "") or "",
         "cro_decision": (cro[3] if cro else "") or "",
+        "quant_basis": quant[6] if quant else None,
+        "qual_basis": qual[6] if qual else None,
+        "cro_basis": cro[6] if cro else None,
         "execution_time_ms": sum(int(row[4] or 0) for row in evaluations),
     }
 
 
-def record_human_override(application_id: int, status: str, rationale: str) -> None:
-    """Persists an underwriter decision together with its audit rationale."""
+def backfill_qualitative_basis() -> int:
+    """Fills the qualitative verdict_basis on runs recorded before it was captured.
+
+    Only the qualitative line is reconstructed, because it is the only one that is
+    exactly recomputable after the fact: the agent's own assessment is still in the
+    stored report, and the floor follows from the structured record. Reconstructed
+    lines say so, so a backfill is never mistaken for a contemporaneous record.
+
+    Rewrites nothing that already has a basis. Returns the number of rows filled.
+    """
+    from src.domain.entities import (
+        assess_behavioral_floor,
+        explain_behavioral_verdict,
+        parse_behavioral_assessment,
+        reconcile_behavioral_assessment,
+    )
+
+    with get_write_connection() as conn:
+        pending = conn.execute(
+            """
+            SELECT e.evaluation_id, e.rationale, c.delinquencies_2yrs, c.employment_length_years
+            FROM agent_evaluations e
+            JOIN loan_applications a ON a.application_id = e.application_id
+            JOIN customers c ON c.customer_id = a.customer_id
+            WHERE e.agent_name = 'Qualitative Agent' AND e.verdict_basis IS NULL
+            """
+        ).fetchall()
+
+        filled = 0
+        for evaluation_id, rationale, delinquencies, employment_years in pending:
+            model_assessment = parse_behavioral_assessment(rationale or "")
+            floor, floor_reason = assess_behavioral_floor(delinquencies, employment_years)
+            final = reconcile_behavioral_assessment(model_assessment, floor)
+            basis = explain_behavioral_verdict(model_assessment, floor, floor_reason, final)
+            conn.execute(
+                "UPDATE agent_evaluations SET verdict_basis = ? WHERE evaluation_id = ?",
+                [f"{basis} (reconstructed from the stored report)", evaluation_id],
+            )
+            filled += 1
+
+        return filled
+
+
+def record_human_override(
+    application_id: int, status: str, rationale: str, underwriter: str
+) -> None:
+    """Persists an underwriter decision with its rationale and who signed for it."""
     with get_write_connection() as conn:
         conn.execute("""
             UPDATE loan_applications
             SET decision_status = ?,
                 override_notes = ?,
+                overridden_by = ?,
                 overridden_at = CURRENT_TIMESTAMP
             WHERE application_id = ?
-        """, [status, rationale, application_id])
+        """, [status, rationale, underwriter, application_id])
 
 
 # Default-probability bands, lowest risk first. Upper bound is exclusive so the
@@ -649,8 +748,14 @@ def record_audit_results(
     xgb_score: float,
     reports: dict,
     timings_ms: dict,
+    bases: dict | None = None,
 ) -> dict:
-    """Persists one committee run: three agent verdicts plus the resulting status."""
+    """Persists one committee run: three agent verdicts plus the resulting status.
+
+    ``bases`` carries a one-line explanation per agent (keys: quant, qual, cro)
+    describing how each verdict was reached, including any policy override.
+    """
+    bases = bases or {}
     with get_write_connection() as conn:
         application_id = resolve_application_id(conn, customer_id, requested_amount)
 
@@ -666,6 +771,7 @@ def record_audit_results(
                 round(xgb_score * 100, 2),
                 reports.get("quant_analysis", ""),
                 int(timings_ms.get("quant", 0)),
+                bases.get("quant"),
             ),
             (
                 application_id,
@@ -674,6 +780,7 @@ def record_audit_results(
                 QUAL_ASSESSMENT_TO_SCORE.get(qual_assessment, 50.0),
                 reports.get("qual_analysis", ""),
                 int(timings_ms.get("qual", 0)),
+                bases.get("qual"),
             ),
             (
                 application_id,
@@ -682,13 +789,15 @@ def record_audit_results(
                 CRO_TIER_TO_SCORE.get(risk_tier, 70.0),
                 reports.get("cro_decision", ""),
                 int(timings_ms.get("cro", 0)),
+                bases.get("cro"),
             ),
         ]
         conn.executemany(
             """
             INSERT INTO agent_evaluations
-                (application_id, agent_name, decision, agent_score, rationale, execution_time_ms)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (application_id, agent_name, decision, agent_score, rationale,
+                 execution_time_ms, verdict_basis)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )

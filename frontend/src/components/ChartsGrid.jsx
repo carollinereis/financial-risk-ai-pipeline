@@ -93,11 +93,20 @@ export function ChartsGrid({ customers = [], refreshKey = 0 }) {
       <div style={gridStyles.card}>
         <h3 style={gridStyles.title}>
           Portfolio Decision Split
-          {consensus ? (
-            <span style={gridStyles.subtitle}>
-              {consensus.consensus_rate_pct}% agent agreement · {consensus.pending_review_count} pending review
-            </span>
-          ) : null}
+          <span style={gridStyles.subtitleStack}>
+            {consensus ? (
+              <span style={gridStyles.subtitle}>
+                {consensus.consensus_rate_pct}% agent agreement · {consensus.pending_review_count} pending review
+              </span>
+            ) : null}
+            {/* The donut covers only clients the committee has ruled on. Without the
+                denominator it reads as the whole portfolio, which it is not. */}
+            {decisions ? (
+              <span style={gridStyles.subtitle}>
+                Based on {decisions.total_applications} of {customers.length} clients analyzed
+              </span>
+            ) : null}
+          </span>
         </h3>
 
         {loading ? (
@@ -138,7 +147,10 @@ export function ChartsGrid({ customers = [], refreshKey = 0 }) {
 
       {/* 2. Credit Score Distribution (monochromatic, zero phantom bars) */}
       <div style={gridStyles.card}>
-        <h3 style={gridStyles.title}>Credit Score Distribution</h3>
+        <h3 style={gridStyles.title}>
+          Credit Score Distribution
+          <span style={gridStyles.subtitle}>All {customers.length} clients on file</span>
+        </h3>
         {customers.length === 0 ? (
           <div style={gridStyles.placeholder}>No applicant data available</div>
         ) : (
@@ -179,6 +191,7 @@ const gridStyles = {
   card: { background: 'var(--surface)', padding: '20px', borderRadius: '8px', border: '1px solid var(--border)' },
   title: { margin: '0 0 15px 0', fontSize: '15px', color: 'var(--text-primary)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px' },
   subtitle: { fontSize: '11px', fontWeight: 400, color: 'var(--text-secondary)' },
+  subtitleStack: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px', textAlign: 'right' },
   placeholder: { height: '250px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '13px' },
   placeholderError: { height: '250px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--status-rejected)', fontSize: '13px', textAlign: 'center', padding: '0 12px' },
 };

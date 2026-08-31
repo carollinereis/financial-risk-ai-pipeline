@@ -2,7 +2,8 @@ from src.domain.entities import (
     AuditResult,
     CustomerProfile,
     RiskEvaluationResult,
-    derive_behavioral_floor,
+    assess_behavioral_floor,
+    explain_behavioral_verdict,
     parse_behavioral_assessment,
     reconcile_behavioral_assessment,
 )
@@ -64,10 +65,25 @@ class RunRiskAuditUseCase:
         # The qualitative tier is checkable against the structured record, so the
         # model's reading is floored by deterministic policy the same way the CRO's
         # decision is floored by quant_standing above.
-        qual_assessment = reconcile_behavioral_assessment(
-            parse_behavioral_assessment(reports.get("qual_analysis", "")),
-            derive_behavioral_floor(profile.delinquencies, profile.employment_length_years),
+        model_assessment = parse_behavioral_assessment(reports.get("qual_analysis", ""))
+        behavioral_floor, floor_reason = assess_behavioral_floor(
+            profile.delinquencies, profile.employment_length_years
         )
+        qual_assessment = reconcile_behavioral_assessment(model_assessment, behavioral_floor)
+
+        # Each agent's verdict is stored with the reasoning that produced it. Where
+        # policy overruled an agent, the stored report and the stored vote disagree
+        # on their face; these lines are what make that legible downstream.
+        bases = {
+            "quant": (
+                f"XGBoost default probability {risk_score * 100:.2f}% against policy "
+                f"thresholds -> {quant_standing}."
+            ),
+            "qual": explain_behavioral_verdict(
+                model_assessment, behavioral_floor, floor_reason, qual_assessment
+            ),
+            "cro": evaluation.explain(),
+        }
 
         # 7. Persist the run so the dashboard reflects real audits, not fixtures.
         record_audit_results(
@@ -80,6 +96,7 @@ class RunRiskAuditUseCase:
             xgb_score=risk_score,
             reports=reports,
             timings_ms=reports.get("timings_ms", {}),
+            bases=bases,
         )
 
         # 8. Build and return pure domain result

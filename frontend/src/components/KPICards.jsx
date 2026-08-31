@@ -2,16 +2,34 @@
 import React, { useState } from 'react';
 
 export function KPICards({ kpis, onViewAllCustomers }) {
+  const total = kpis.total ?? 0;
+  const analyzed = kpis.analyzed ?? 0;
+  const coveragePct = total ? Math.round((analyzed / total) * 100) : 0;
+
   return (
     <div style={kpiStyles.grid}>
       <Card
         title="Total Customers"
-        value={kpis.total || 0}
+        value={total}
         subtext="Database Records"
         action={onViewAllCustomers ? { label: 'View All →', onClick: onViewAllCustomers } : null}
       />
+      {/* Every rate on this row is computed over the analyzed slice, not the
+          roster. Stating the coverage once, up front, is what keeps the rest of
+          the dashboard honest. */}
+      <Card
+        title="Committee Coverage"
+        value={`${analyzed} / ${total}`}
+        subtext={`${coveragePct}% of clients have a saved audit`}
+      />
       <Card title="Portfolio Avg Credit Score" value={kpis.avgScore || 0} subtext="Weighted Average" />
-      <Card title="Portfolio Approval Rate" value={`${kpis.approvalRate || 65}%`} subtext="Automated Policy" />
+      <Card
+        title="Portfolio Approval Rate"
+        value={`${kpis.approvalRate ?? 0}%`}
+        subtext={`Of ${kpis.totalApplications ?? 0} analyzed application${
+          (kpis.totalApplications ?? 0) === 1 ? '' : 's'
+        }`}
+      />
       <Card 
         title="Avg Decision Time" 
         value={`${kpis.avgTime || 4.2}s`} 

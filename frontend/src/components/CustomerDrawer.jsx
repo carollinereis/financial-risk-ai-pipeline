@@ -22,6 +22,20 @@ const formatDate = (value) => {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 };
 
+const daysSince = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value.replace(' ', 'T'));
+  if (Number.isNaN(parsed.getTime())) return null;
+  return Math.floor((Date.now() - parsed.getTime()) / 86_400_000);
+};
+
+// A report older than this is flagged for a look, not invalidated: the committee's
+// reasoning may still hold, but nobody should assume it does without checking.
+const STALE_AFTER_DAYS = 14;
+// Below this the two probabilities are the same score with rounding noise between
+// them; the saved value is persisted to two decimals as a percentage.
+const DRIFT_EPSILON = 0.005;
+
 export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
   const [profile, setProfile] = useState(null);
   const [audit, setAudit] = useState(null);
@@ -90,6 +104,18 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
   };
 
   const lastAnalyzed = formatDate(audit?.last_analyzed_at);
+  const auditAgeDays = daysSince(audit?.last_analyzed_at);
+  const isStale = auditSource === 'saved' && auditAgeDays !== null && auditAgeDays >= STALE_AFTER_DAYS;
+
+  // The committee reasoned from the model score as it stood at audit time. If the
+  // model has re-scored the client since, the report argues from a number that no
+  // longer holds — the one thing that decides whether it can be trusted as-is.
+  const savedScore = auditSource === 'saved' ? audit?.xgb_risk_score : null;
+  const liveScore = profile?.live_xgb_risk_score;
+  const hasDrift =
+    savedScore != null &&
+    liveScore != null &&
+    Math.abs(liveScore - savedScore) > DRIFT_EPSILON;
 
   if (!customerId || !profile) return null;
 
@@ -165,6 +191,35 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
                   : "Run Executive AI Audit"}
             </button>
 
+            {hasDrift && (
+              <div style={{ ...drawerStyles.banner, borderColor: 'var(--status-review)' }}>
+                <strong>Model has re-scored this client since the audit.</strong> The committee
+                reasoned from {(savedScore * 100).toFixed(2)}%; the model now reports{' '}
+                {(liveScore * 100).toFixed(2)}%. Re-run before relying on this verdict.
+              </div>
+            )}
+
+            {isStale && !hasDrift && (
+              <div style={{ ...drawerStyles.banner, borderColor: 'var(--border)' }}>
+                This report is {auditAgeDays} days old. The model score is unchanged, but the
+                underwriter notes it cites may not be.
+              </div>
+            )}
+
+            {audit?.human_overridden && (
+              <div style={{ ...drawerStyles.banner, borderColor: 'var(--accent)' }}>
+                <strong>Underwriter override on record.</strong>
+                <div style={drawerStyles.overrideMeta}>
+                  {audit.overridden_by || 'Unattributed'} ·{' '}
+                  {formatDate(audit.overridden_at) || 'date unknown'} · final status{' '}
+                  {audit.decision}
+                </div>
+                {audit.override_notes && (
+                  <p style={drawerStyles.overrideNotes}>“{audit.override_notes}”</p>
+                )}
+              </div>
+            )}
+
             {audit && (
               <div style={drawerStyles.verdict}>
                 <div style={drawerStyles.verdictHead}>
@@ -179,8 +234,10 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
                   {audit.risk_tier && (
                     <span style={drawerStyles.tier}>Risk tier: {audit.risk_tier}</span>
                   )}
-                  {audit.human_overridden && (
-                    <span style={drawerStyles.tier}>Human override on record</span>
+                  {audit.execution_time_ms > 0 && (
+                    <span style={drawerStyles.tier}>
+                      Committee runtime: {(audit.execution_time_ms / 1000).toFixed(1)}s
+                    </span>
                   )}
                 </div>
 
@@ -191,12 +248,24 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
                 <details style={drawerStyles.details}>
                   <summary style={drawerStyles.summary}>Full committee transcript</summary>
                   <div style={drawerStyles.transcript}>
-                    <h5 style={drawerStyles.transcriptLabel}>Quantitative Agent</h5>
-                    <AgentReport text={audit.quant_analysis} />
-                    <h5 style={drawerStyles.transcriptLabel}>Qualitative Agent</h5>
-                    <AgentReport text={audit.qual_analysis} />
-                    <h5 style={drawerStyles.transcriptLabel}>CRO Decision Agent</h5>
-                    <AgentReport text={audit.cro_decision || audit.cro_report} />
+                    <AgentSection
+                      label="Quantitative Agent"
+                      verdict={audit.quant_verdict}
+                      basis={audit.quant_basis}
+                      text={audit.quant_analysis}
+                    />
+                    <AgentSection
+                      label="Qualitative Agent"
+                      verdict={audit.qual_verdict}
+                      basis={audit.qual_basis}
+                      text={audit.qual_analysis}
+                    />
+                    <AgentSection
+                      label="CRO Decision Agent"
+                      verdict={audit.cro_verdict}
+                      basis={audit.cro_basis}
+                      text={audit.cro_decision || audit.cro_report}
+                    />
                   </div>
                 </details>
               </div>
@@ -204,6 +273,22 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// An agent's recorded vote can differ from the conclusion in its own prose, because
+// deterministic policy may have overruled it. The basis line carries that reasoning,
+// so the transcript never shows a verdict the report appears to contradict.
+function AgentSection({ label, verdict, basis, text }) {
+  return (
+    <div>
+      <h5 style={drawerStyles.transcriptLabel}>
+        {label}
+        {verdict && <span style={drawerStyles.transcriptVerdict}>{verdict}</span>}
+      </h5>
+      {basis && <p style={drawerStyles.transcriptBasis}>{basis}</p>}
+      <AgentReport text={text} />
     </div>
   );
 }
@@ -224,6 +309,9 @@ const drawerStyles = {
   rerunBtn: { width: '100%', padding: '10px', background: 'transparent', color: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' },
   auditHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' },
   savedTag: { fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' },
+  banner: { background: 'var(--bg)', border: '1px solid', borderRadius: '6px', padding: '10px 12px', fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.5, marginBottom: '10px' },
+  overrideMeta: { fontSize: '11px', color: 'var(--text-secondary)', marginTop: '3px' },
+  overrideNotes: { fontSize: '12px', fontStyle: 'italic', color: 'var(--text-primary)', margin: '6px 0 0 0' },
   noAudit: { fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 10px 0' },
   verdict: { marginTop: '15px', background: 'var(--bg)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border)' },
   verdictHead: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' },
@@ -232,5 +320,7 @@ const drawerStyles = {
   details: { marginTop: '14px', borderTop: '1px solid var(--border)', paddingTop: '10px' },
   summary: { cursor: 'pointer', fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' },
   transcript: { marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' },
-  transcriptLabel: { margin: '10px 0 0 0', fontSize: '11px', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.04em' }
+  transcriptLabel: { margin: '10px 0 0 0', fontSize: '11px', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '8px' },
+  transcriptVerdict: { border: '1px solid var(--border)', borderRadius: '4px', padding: '1px 6px', fontSize: '10px', color: 'var(--text-secondary)', letterSpacing: '0.02em' },
+  transcriptBasis: { margin: '4px 0 6px 0', fontSize: '11px', lineHeight: 1.5, color: 'var(--text-secondary)', fontStyle: 'italic' }
 };

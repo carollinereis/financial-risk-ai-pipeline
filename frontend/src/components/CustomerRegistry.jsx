@@ -22,6 +22,15 @@ const FILTERS = [
   { key: 'PENDING', label: 'Not analyzed' },
 ];
 
+// Matches the drawer's threshold: below this the saved and live probabilities
+// are the same score with rounding noise between them.
+const DRIFT_EPSILON = 0.005;
+
+const hasDrifted = (row) =>
+  row.audit_risk_score != null &&
+  row.risk_score != null &&
+  Math.abs(row.risk_score - row.audit_risk_score) > DRIFT_EPSILON;
+
 const formatDate = (value) => {
   if (!value) return '—';
   const parsed = new Date(value.replace(' ', 'T'));
@@ -169,8 +178,20 @@ export function CustomerRegistry({
                           >
                             {row.decision_status}
                           </span>
+                          {/* Three facts that change how much weight the verdict
+                              carries, none of them visible from the status alone. */}
                           {row.human_overridden && (
-                            <div style={registryStyles.subtle}>Human override</div>
+                            <div style={registryStyles.subtle}>
+                              Override · {row.overridden_by || 'unattributed'}
+                            </div>
+                          )}
+                          {row.committee_split && (
+                            <div style={registryStyles.subtle}>Split committee</div>
+                          )}
+                          {hasDrifted(row) && (
+                            <div style={registryStyles.drift}>
+                              Model re-scored since audit
+                            </div>
                           )}
                         </>
                       ) : (
@@ -280,6 +301,7 @@ const registryStyles = {
   tr: { borderBottom: '1px solid var(--border)' },
   td: { padding: '12px 10px', color: 'var(--text-primary)', verticalAlign: 'top' },
   subtle: { color: 'var(--text-secondary)', fontSize: '11px', marginTop: '2px' },
+  drift: { color: 'var(--status-review)', fontSize: '11px', marginTop: '2px', fontWeight: '600' },
   badge: {
     display: 'inline-block',
     padding: '3px 8px',

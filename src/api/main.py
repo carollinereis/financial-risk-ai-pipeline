@@ -67,6 +67,10 @@ ALLOWED_OVERRIDE_STATUSES = {"APPROVED", "REJECTED"}
 class HumanOverrideRequest(BaseModel):
     status: str  # e.g., 'APPROVED' or 'REJECTED'
     rationale: str
+    # Who is signing for the ruling. Self-declared: the dashboard has no auth, so
+    # this attributes the decision without authenticating it. Required all the same
+    # so no override can enter the trail anonymously.
+    underwriter: str
 
 @app.get("/customers", response_model=list[CustomerListItem])
 def list_customers():
@@ -234,13 +238,21 @@ def override_human_decision(application_id: int, payload: HumanOverrideRequest):
     if not rationale:
         raise HTTPException(status_code=422, detail="An override rationale is required for the audit trail.")
 
+    underwriter = payload.underwriter.strip()
+    if not underwriter:
+        raise HTTPException(
+            status_code=422,
+            detail="An underwriter name is required so the override is attributable.",
+        )
+
     try:
-        record_human_override(application_id, status, rationale)
+        record_human_override(application_id, status, rationale, underwriter)
 
         return {
             "message": "Decision successfully updated",
             "application_id": application_id,
-            "new_status": status
+            "new_status": status,
+            "overridden_by": underwriter,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating decision: {str(e)}") from e
