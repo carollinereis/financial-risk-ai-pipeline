@@ -5,7 +5,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from src.api.schemas import AuditResultResponse, CustomerListItem, CustomerProfileResponse
+from src.api.schemas import (
+    AuditResultResponse,
+    CustomerListItem,
+    CustomerProfileResponse,
+    CustomerRegistryItem,
+    SavedAuditResponse,
+)
 from src.application.run_risk_audit import RunRiskAuditUseCase
 from src.domain.policy import policy_reference
 from src.infra.agents.agent_tools import (
@@ -16,10 +22,12 @@ from src.infra.config import DUCKDB_PATH
 from src.infra.database.database import (
     fetch_agent_consensus_stats,
     fetch_agent_divergence,
+    fetch_customer_registry,
     fetch_decision_distribution,
     fetch_executive_kpis,
     fetch_hitl_exception_queue,
     fetch_risk_profile_distribution,
+    fetch_saved_audit,
     init_portfolio_tables,
     record_human_override,
     seed_sample_agent_analytics,
@@ -100,6 +108,22 @@ def get_customer_profile(customer_id: int):
     )
 
 
+@app.get("/customers/{customer_id}/audit", response_model=SavedAuditResponse)
+def get_saved_audit(customer_id: int):
+    """Replay the stored committee transcript. Never invokes the agent pipeline."""
+    try:
+        saved = fetch_saved_audit(customer_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching saved audit: {str(e)}") from e
+
+    if saved is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No saved audit recorded for customer ID {customer_id}.",
+        )
+    return SavedAuditResponse(**saved)
+
+
 @app.post("/customers/{customer_id}/audit", response_model=AuditResultResponse)
 def run_audit(customer_id: int):
     """Trigger multi-agent risk audit committee pipeline."""
@@ -131,6 +155,15 @@ def get_dashboard_kpis():
         return fetch_executive_kpis()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching executive KPIs: {str(e)}") from e
+
+
+@app.get("/api/dashboard/customer-registry", response_model=list[CustomerRegistryItem])
+def get_customer_registry():
+    """Fetch every customer with the standing verdict and date of their last audit."""
+    try:
+        return fetch_customer_registry()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching customer registry: {str(e)}") from e
 
 
 @app.get("/api/dashboard/agent-analytics")

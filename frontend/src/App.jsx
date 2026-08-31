@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ChartsGrid } from './components/ChartsGrid';
 import { CustomerDrawer } from './components/CustomerDrawer';
+import { CustomerRegistry } from './components/CustomerRegistry';
 import { ExceptionQueue } from './components/ExceptionQueue';
 import { KPICards } from './components/KPICards';
 import { Navbar } from './components/Navbar';
@@ -12,21 +13,31 @@ const API_BASE = 'http://localhost:8000';
 function App() {
   const [customers, setCustomers] = useState([]);
   const [kpis, setKpis] = useState({});
-  // A single source of truth: null means no client is open. The Navbar dropdown
-  // and the exception queue are two triggers onto the same drawer.
+  // A single source of truth: null means no client is open. The navbar quick
+  // search and the exception queue are two triggers onto the same drawer.
   const [inspectedId, setInspectedId] = useState(null);
+  // The registry is a third trigger onto the same drawer; it stays mounted behind
+  // the drawer so closing a report returns the underwriter to their place in the list.
+  const [registryOpen, setRegistryOpen] = useState(false);
+  const [registryLoaded, setRegistryLoaded] = useState(false);
   const [error, setError] = useState(null);
   // Bumped whenever a write lands (audit run, underwriter override) so the
   // aggregate views refetch instead of showing pre-write numbers.
   const [dataVersion, setDataVersion] = useState(0);
 
   useEffect(() => {
-    fetch(`${API_BASE}/customers`)
+    // The registry endpoint is a superset of /customers: same roster, plus each
+    // client's standing verdict and whether a saved audit exists. One fetch feeds
+    // the navbar search badges, the score histogram, and the registry table.
+    fetch(`${API_BASE}/api/dashboard/customer-registry`)
       .then((res) => {
-        if (!res.ok) throw new Error(`GET /customers -> ${res.status}`);
+        if (!res.ok) throw new Error(`GET /api/dashboard/customer-registry -> ${res.status}`);
         return res.json();
       })
-      .then((data) => setCustomers(data))
+      .then((data) => {
+        setCustomers(Array.isArray(data) ? data : []);
+        setRegistryLoaded(true);
+      })
       .catch((err) => setError(err.message));
 
     fetch(`${API_BASE}/api/dashboard/kpis`)
@@ -47,11 +58,7 @@ function App() {
 
   return (
     <div style={appStyles.shell}>
-      <Navbar
-        customers={customers}
-        selectedId={inspectedId}
-        onSelectCustomer={handleInspect}
-      />
+      <Navbar customers={customers} onSelectCustomer={handleInspect} />
 
       {error && (
         <div style={appStyles.error}>
@@ -67,6 +74,16 @@ function App() {
           approvalRate: kpis.approval_rate_pct,
           avgTime: kpis.avg_decision_time_sec,
         }}
+        onViewAllCustomers={() => setRegistryOpen(true)}
+      />
+
+      <CustomerRegistry
+        open={registryOpen}
+        customers={customers}
+        loading={!registryLoaded && !error}
+        error={error}
+        onClose={() => setRegistryOpen(false)}
+        onInspectCustomer={handleInspect}
       />
 
       <ChartsGrid customers={customers} refreshKey={dataVersion} />

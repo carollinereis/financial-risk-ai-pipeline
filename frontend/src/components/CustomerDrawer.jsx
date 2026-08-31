@@ -16,9 +16,19 @@ const extractRationale = (text) => {
   return (match ? match[1] : text || '').trim();
 };
 
+const formatDate = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value.replace(' ', 'T'));
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+};
+
 export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
   const [profile, setProfile] = useState(null);
   const [audit, setAudit] = useState(null);
+  // Distinguishes a replayed transcript from one produced by the run just made,
+  // so the header can state which the underwriter is reading.
+  const [auditSource, setAuditSource] = useState(null);
+  const [loadingSaved, setLoadingSaved] = useState(true);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -35,6 +45,29 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
         if (err.name !== 'AbortError') console.error("Failed to load customer profile:", err);
       });
 
+    // The saved transcript is a plain DuckDB read: opening a file never spends an
+    // LLM call, so the committee's last verdict is on screen immediately. A 404
+    // simply means this client has not been through the committee yet.
+    fetch(`${API_BASE}/customers/${customerId}/audit`, { signal: controller.signal })
+      .then(res => {
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`GET /customers/${customerId}/audit -> ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        if (data) {
+          setAudit(data);
+          setAuditSource('saved');
+        }
+        setLoadingSaved(false);
+      })
+      .catch(err => {
+        if (err.name !== 'AbortError') {
+          console.error("Failed to load saved audit:", err);
+          setLoadingSaved(false);
+        }
+      });
+
     // Switching clients fast must not let a slow earlier response overwrite a newer one.
     return () => controller.abort();
   }, [customerId]);
@@ -45,6 +78,7 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
       .then(res => res.json())
       .then(data => {
         setAudit(data);
+        setAuditSource('fresh');
         setLoading(false);
         // An audit writes decision_status, so the aggregate views are now stale.
         onAuditComplete?.();
@@ -54,6 +88,8 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
         setLoading(false);
       });
   };
+
+  const lastAnalyzed = formatDate(audit?.last_analyzed_at);
 
   if (!customerId || !profile) return null;
 
@@ -97,8 +133,36 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
 
           {/* Section 4: Live Llama 3 Multi-Agent Audit Trigger */}
           <div style={drawerStyles.section}>
-            <button onClick={runAudit} disabled={loading} style={drawerStyles.auditBtn}>
-              {loading ? "Running Multi-Agent Audit..." : "Run Executive AI Audit"}
+            <div style={drawerStyles.auditHead}>
+              <h3 style={{ color: 'var(--accent)', margin: 0 }}>Multi-Agent Committee Report</h3>
+              {audit && auditSource === 'saved' && (
+                <span style={drawerStyles.savedTag}>
+                  Saved report{lastAnalyzed ? ` · ${lastAnalyzed}` : ''}
+                </span>
+              )}
+              {audit && auditSource === 'fresh' && (
+                <span style={drawerStyles.savedTag}>Fresh committee run</span>
+              )}
+            </div>
+
+            {/* The saved report is the default view; a fresh run is an explicit,
+                separately-labelled action because it costs three LLM calls. */}
+            {!audit && !loadingSaved && (
+              <p style={drawerStyles.noAudit}>
+                No committee audit has been recorded for this client yet.
+              </p>
+            )}
+
+            <button
+              onClick={runAudit}
+              disabled={loading}
+              style={audit ? drawerStyles.rerunBtn : drawerStyles.auditBtn}
+            >
+              {loading
+                ? "Running Multi-Agent Audit..."
+                : audit
+                  ? "Re-run Multi-Agent Audit"
+                  : "Run Executive AI Audit"}
             </button>
 
             {audit && (
@@ -112,7 +176,12 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
                   >
                     {audit.decision}
                   </span>
-                  <span style={drawerStyles.tier}>Risk tier: {audit.risk_tier}</span>
+                  {audit.risk_tier && (
+                    <span style={drawerStyles.tier}>Risk tier: {audit.risk_tier}</span>
+                  )}
+                  {audit.human_overridden && (
+                    <span style={drawerStyles.tier}>Human override on record</span>
+                  )}
                 </div>
 
                 <AgentReport text={extractRationale(audit.cro_decision || audit.cro_report)} />
@@ -151,6 +220,11 @@ const drawerStyles = {
   grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '13px' },
   label: { color: 'var(--text-secondary)', display: 'block', fontSize: '11px' },
   auditBtn: { width: '100%', padding: '12px', background: 'var(--accent)', color: 'var(--bg)', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' },
+  // Secondary weight once a saved report exists: re-running is the exception, not the default path.
+  rerunBtn: { width: '100%', padding: '10px', background: 'transparent', color: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' },
+  auditHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' },
+  savedTag: { fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' },
+  noAudit: { fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 10px 0' },
   verdict: { marginTop: '15px', background: 'var(--bg)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border)' },
   verdictHead: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' },
   decisionBadge: { padding: '4px 10px', borderRadius: '4px', color: 'var(--bg)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.03em' },

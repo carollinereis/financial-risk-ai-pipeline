@@ -351,6 +351,144 @@ def fetch_hitl_exception_queue() -> list:
         return applications
 
 
+# The registry and the saved-report view both read the customer's most recent
+# application; a re-audit rewrites that row's verdicts in place, so "latest
+# application" and "current standing" are the same record.
+LATEST_APPLICATION_CTE = """
+    WITH latest_application AS (
+        SELECT application_id, customer_id, decision_status, overridden_at, created_at
+        FROM (
+            SELECT
+                application_id, customer_id, decision_status, overridden_at, created_at,
+                ROW_NUMBER() OVER (
+                    PARTITION BY customer_id ORDER BY created_at DESC, application_id DESC
+                ) AS recency_rank
+            FROM loan_applications
+        )
+        WHERE recency_rank = 1
+    )
+"""
+
+
+def fetch_customer_registry() -> list:
+    """Lists every customer with the standing verdict of their latest audit, if any.
+
+    Read-only by construction: the pipeline is never triggered from here, so the
+    registry can be opened on the whole portfolio without spending an LLM call.
+    """
+    with get_read_connection() as conn:
+        registry_query = (
+            LATEST_APPLICATION_CTE
+            + """
+            SELECT
+                c.customer_id,
+                c.full_name,
+                c.credit_score,
+                CAST(c.risk_score AS DOUBLE) AS risk_score,
+                a.application_id,
+                a.decision_status,
+                a.overridden_at IS NOT NULL AS human_overridden,
+                e.cro_verdict,
+                e.last_analyzed_at,
+                e.agent_count
+            FROM customers c
+            LEFT JOIN latest_application a ON a.customer_id = c.customer_id
+            LEFT JOIN (
+                SELECT
+                    application_id,
+                    MAX(evaluated_at) AS last_analyzed_at,
+                    COUNT(*) AS agent_count,
+                    MAX(CASE WHEN agent_name = 'CRO Decision Agent' THEN decision END) AS cro_verdict
+                FROM agent_evaluations
+                GROUP BY application_id
+            ) e ON e.application_id = a.application_id
+            ORDER BY c.customer_id
+        """
+        )
+        rows = conn.execute(registry_query).df().to_dict(orient="records")
+
+    for row in rows:
+        application_id = row.get("application_id")
+        last_analyzed = row.get("last_analyzed_at")
+        # A customer with no application has never faced the committee; the UI
+        # shows "Not analyzed" rather than an empty verdict cell.
+        row["application_id"] = None if pd.isna(application_id) else int(application_id)
+        row["has_saved_audit"] = bool(row["application_id"]) and int(row.get("agent_count") or 0) > 0
+        row["last_analyzed_at"] = None if pd.isna(last_analyzed) else str(last_analyzed)
+        row["decision_status"] = None if pd.isna(row.get("decision_status")) else row["decision_status"]
+        row["cro_verdict"] = None if pd.isna(row.get("cro_verdict")) else row["cro_verdict"]
+        row["human_overridden"] = bool(row.get("human_overridden"))
+        row["risk_score"] = None if pd.isna(row.get("risk_score")) else float(row["risk_score"])
+        row.pop("agent_count", None)
+
+    return rows
+
+
+def fetch_saved_audit(customer_id: int) -> dict | None:
+    """Returns the persisted committee transcript for a customer's latest application.
+
+    Returns None when no run has been recorded, which the API surfaces as a 404 so
+    the dashboard can offer a first run instead of rendering an empty report.
+    """
+    with get_read_connection() as conn:
+        application = conn.execute(
+            """
+            SELECT application_id, decision_status, override_notes, overridden_at, created_at
+            FROM loan_applications
+            WHERE customer_id = ?
+            ORDER BY created_at DESC, application_id DESC
+            LIMIT 1
+            """,
+            [customer_id],
+        ).fetchone()
+        if not application:
+            return None
+
+        application_id = int(application[0])
+        evaluations = conn.execute(
+            """
+            SELECT
+                agent_name,
+                decision,
+                CAST(agent_score AS DOUBLE) AS agent_score,
+                rationale,
+                execution_time_ms,
+                evaluated_at
+            FROM agent_evaluations
+            WHERE application_id = ?
+            ORDER BY agent_name
+            """,
+            [application_id],
+        ).fetchall()
+
+    if not evaluations:
+        return None
+
+    by_agent = {row[0]: row for row in evaluations}
+    quant = by_agent.get("Quantitative Agent")
+    qual = by_agent.get("Qualitative Agent")
+    cro = by_agent.get("CRO Decision Agent")
+
+    return {
+        "customer_id": customer_id,
+        "application_id": application_id,
+        "decision": application[1] or "MANUAL REVIEW REQUIRED",
+        "human_overridden": application[3] is not None,
+        "override_notes": application[2],
+        "last_analyzed_at": str(max(row[5] for row in evaluations)),
+        # Scores are persisted as percentages; the live audit response reports the
+        # XGBoost probability on a 0-1 scale, so convert back for one shared shape.
+        "xgb_risk_score": (quant[2] / 100.0) if quant and quant[2] is not None else 0.0,
+        "quant_verdict": quant[1] if quant else None,
+        "qual_verdict": qual[1] if qual else None,
+        "cro_verdict": cro[1] if cro else None,
+        "quant_analysis": (quant[3] if quant else "") or "",
+        "qual_analysis": (qual[3] if qual else "") or "",
+        "cro_decision": (cro[3] if cro else "") or "",
+        "execution_time_ms": sum(int(row[4] or 0) for row in evaluations),
+    }
+
+
 def record_human_override(application_id: int, status: str, rationale: str) -> None:
     """Persists an underwriter decision together with its audit rationale."""
     with get_write_connection() as conn:
