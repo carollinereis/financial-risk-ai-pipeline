@@ -1,45 +1,77 @@
+from contextlib import asynccontextmanager
+
 import duckdb
-from typing import List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-from src.infra.config import DUCKDB_PATH
+from src.api.schemas import AuditResultResponse, CustomerListItem, CustomerProfileResponse
+from src.application.run_risk_audit import RunRiskAuditUseCase
+from src.domain.policy import policy_reference
 from src.infra.agents.agent_tools import (
     get_customer_financial_profile,
-    get_sanitized_customer_notes
+    get_sanitized_customer_notes,
 )
-from src.application.run_risk_audit import RunRiskAuditUseCase
-from src.api.schemas import (
-    CustomerListItem,
-    CustomerProfileResponse,
-    AuditResultResponse
+from src.infra.config import DUCKDB_PATH
+from src.infra.database.database import (
+    fetch_agent_consensus_stats,
+    fetch_agent_divergence,
+    fetch_decision_distribution,
+    fetch_executive_kpis,
+    fetch_hitl_exception_queue,
+    fetch_risk_profile_distribution,
+    init_portfolio_tables,
+    record_human_override,
+    seed_sample_agent_analytics,
 )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Ensures portfolio extension tables exist and seed data is loaded."""
+    init_portfolio_tables()
+    seed_sample_agent_analytics()
+    yield
+
 
 app = FastAPI(
     title="Financial Risk AI Pipeline API",
     description="Backend service exposing ML risk scores and Multi-Agent Audit evaluations.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Enable CORS for Vite dev server (and local testing)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# --- Pydantic Schemas for Dashboard Actions ---
+# Underwriters may only settle a case one of two ways; anything else is rejected
+# at the boundary so placeholder values can never reach decision_status.
+ALLOWED_OVERRIDE_STATUSES = {"APPROVED", "REJECTED"}
 
-@app.get("/customers", response_model=List[CustomerListItem])
+
+class HumanOverrideRequest(BaseModel):
+    status: str  # e.g., 'APPROVED' or 'REJECTED'
+    rationale: str
+
+@app.get("/customers", response_model=list[CustomerListItem])
 def list_customers():
     """Fetch available customer list for dropdown selection."""
     try:
         with duckdb.connect(str(DUCKDB_PATH), read_only=True) as conn:
-            df = conn.execute("SELECT customer_id, full_name FROM customers ORDER BY customer_id").df()
+            df = conn.execute(
+                "SELECT customer_id, full_name, credit_score, risk_score "
+                "FROM customers ORDER BY customer_id"
+            ).df()
         return df.to_dict(orient="records")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}") from e
 
 
 @app.get("/customers/{customer_id}", response_model=CustomerProfileResponse)
@@ -48,9 +80,9 @@ def get_customer_profile(customer_id: int):
     profile = get_customer_financial_profile(customer_id)
     if not profile or "error" in profile:
         raise HTTPException(status_code=404, detail=f"Customer ID {customer_id} not found.")
-    
+
     notes = get_sanitized_customer_notes(customer_id)
-    
+
     # Standardize output to match schema
     return CustomerProfileResponse(
         customer_id=profile["customer_id"],
@@ -74,20 +106,108 @@ def run_audit(customer_id: int):
     try:
         use_case = RunRiskAuditUseCase()
         result = use_case.execute(customer_id)
-        
-        # If result is an object/dataclass, read attributes; otherwise read dict keys
-        def get_val(obj, attr, default=""):
-            if isinstance(obj, dict):
-                return obj.get(attr, default)
-            return getattr(obj, attr, default)
 
+        # execute() returns a typed AuditResult, so read its attributes directly.
+        # Pydantic validates the types at the response boundary.
         return AuditResultResponse(
-            customer_id=customer_id,
-            quantitative_standing=str(get_val(result, "quant_standing", get_val(result, "quant_standing", "CRITICAL RISK"))),
-            xgb_risk_score=float(get_val(result, "xgb_score", get_val(result, "xgb_risk_score", 0.0))),
-            cro_decision=str(get_val(result, "cro_report", get_val(result, "cro_decision", "No decision rendered."))),
-            quant_analysis=str(get_val(result, "quant_report", "")),
-            qual_analysis=str(get_val(result, "qual_report", ""))
+            customer_id=result.customer_id,
+            quantitative_standing=result.quant_standing,
+            xgb_risk_score=result.risk_score,
+            cro_decision=result.cro_report,
+            quant_analysis=result.quant_report,
+            qual_analysis=result.qual_report,
+            decision=result.decision,
+            risk_tier=result.risk_tier,
+            qual_assessment=result.qual_assessment,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Audit execution error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Audit execution error: {str(e)}") from e
+
+# --- Executive Dashboard & AI Ops Endpoints ---
+@app.get("/api/dashboard/kpis")
+def get_dashboard_kpis():
+    """Fetch high-level executive KPIs for the top card grid."""
+    try:
+        return fetch_executive_kpis()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching executive KPIs: {str(e)}") from e
+
+
+@app.get("/api/dashboard/agent-analytics")
+def get_agent_analytics():
+    """Fetch AI agent consensus/divergence distributions for Recharts."""
+    try:
+        return fetch_agent_divergence()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching agent analytics: {str(e)}") from e
+
+
+@app.get("/api/dashboard/agent-consensus")
+def get_agent_consensus():
+    """Fetch unanimous vs divergent split driving the HITL exception workload."""
+    try:
+        return fetch_agent_consensus_stats()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching agent consensus: {str(e)}") from e
+
+
+@app.get("/api/dashboard/policy-reference")
+def get_policy_reference():
+    """Serves the enforced underwriting thresholds and the committee's policy list."""
+    try:
+        return policy_reference()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching policy reference: {str(e)}") from e
+
+
+@app.get("/api/dashboard/decision-distribution")
+def get_decision_distribution():
+    """Fetch the portfolio outcome split (approved/rejected/manual review) for the donut."""
+    try:
+        return fetch_decision_distribution()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching decision distribution: {str(e)}") from e
+
+
+@app.get("/api/dashboard/hitl-queue")
+def get_hitl_queue():
+    """Fetch applications where the agent committee disagreed, pending human review."""
+    try:
+        return fetch_hitl_exception_queue()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching HITL queue: {str(e)}") from e
+
+
+@app.get("/api/dashboard/risk-profile")
+def get_risk_profile():
+    """Fetch portfolio rating bands, DTI-vs-default scatter, and delinquency matrix."""
+    try:
+        return fetch_risk_profile_distribution()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching risk profile: {str(e)}") from e
+
+
+@app.patch("/api/dashboard/override/{application_id}")
+def override_human_decision(application_id: int, payload: HumanOverrideRequest):
+    """Allows an underwriter to manually approve/reject flagged cases in the HITL queue."""
+    status = payload.status.strip().upper()
+    if status not in ALLOWED_OVERRIDE_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid status '{payload.status}'. Expected one of: {sorted(ALLOWED_OVERRIDE_STATUSES)}.",
+        )
+
+    rationale = payload.rationale.strip()
+    if not rationale:
+        raise HTTPException(status_code=422, detail="An override rationale is required for the audit trail.")
+
+    try:
+        record_human_override(application_id, status, rationale)
+
+        return {
+            "message": "Decision successfully updated",
+            "application_id": application_id,
+            "new_status": status
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating decision: {str(e)}") from e

@@ -1,5 +1,5 @@
-from typing import Optional
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, ConfigDict
 
 
 # ------------------------------------------------------------------
@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 class CustomerListItem(BaseModel):
     customer_id: int
     full_name: str
+    credit_score: int
+    risk_score: float | None = None
 
 
 # ------------------------------------------------------------------
@@ -21,14 +23,13 @@ class CustomerProfileResponse(BaseModel):
     annual_income: float
     loan_amount_requested: float
     delinquencies_2yrs: int
-    employment_length_years: Optional[int] = None
+    employment_length_years: int | None = None
     live_xgb_risk_score: float
-    cpf: Optional[str] = None       # Sanitized / Masked PII
-    email: Optional[str] = None     # Sanitized / Masked PII
-    sanitized_notes: Optional[str] = None
+    cpf: str | None = None       # Sanitized / Masked PII
+    email: str | None = None     # Sanitized / Masked PII
+    sanitized_notes: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ------------------------------------------------------------------
@@ -41,3 +42,8 @@ class AuditResultResponse(BaseModel):
     cro_decision: str
     quant_analysis: str
     qual_analysis: str
+    # Structured verdict parsed from the CRO prose; additive, so existing
+    # consumers of the free-text fields keep working unchanged.
+    decision: str = "MANUAL REVIEW REQUIRED"
+    risk_tier: str = "HIGH"
+    qual_assessment: str = "MEDIUM"

@@ -1,8 +1,8 @@
-from pathlib import Path
 from datetime import datetime
 
-from src.infra.database.database import get_db_connection, bulk_update_risk_scores, init_db
-from src.infra.ml.credit_risk_model import CreditRiskModel, HIGH_RISK_THRESHOLD, MODEL_VERSION
+from src.infra.database.database import bulk_update_risk_scores, get_db_connection, init_db
+from src.infra.ml.credit_risk_model import HIGH_RISK_THRESHOLD, MODEL_VERSION, CreditRiskModel
+
 
 def run_training_pipeline():
     init_db()
@@ -32,7 +32,7 @@ def run_training_pipeline():
 
     # 5. Save XGBoost native JSON artifact and bulk update DuckDB
     model_pipeline.save_model()
-    
+
     with get_db_connection() as conn:
         bulk_update_risk_scores(conn, df)
 

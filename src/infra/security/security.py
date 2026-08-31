@@ -1,7 +1,7 @@
 import re
 
-from src.infra.config import ENABLE_PII_MASKING
 from src.infra.database.database import get_db_connection
+
 
 def sanitize_input(text: str) -> str:
     """Strips potential prompt injection characters/tags and attack phrases from text."""
@@ -13,7 +13,7 @@ def sanitize_input(text: str) -> str:
 
     # 2. Strip known prompt injection command patterns
     injection_patterns = [
-        r"(?i)ignore\s+(all\s+|previous\s+|prior\s+)?instructions.*",
+        r"(?i)ignore\s+(?:all\s+|previous\s+|prior\s+|the\s+|above\s+)*instructions.*",
         r"(?i)system\s+prompt.*",
         r"(?i)override\s+(decision|rules).*",
         r"(?i)and\s+return\s+approved.*",
@@ -52,7 +52,9 @@ def mask_phone(phone: str) -> str:
     """Masks phone number (e.g., +55 11 *****-4321)."""
     if not phone or not isinstance(phone, str):
         return "+55 ** *****-****"
-    return re.sub(r"(\+?\d{2}\s?\d{2}\s?)\d{5}(-\d{4})", r"\1*****\2", phone)
+    # Fail closed: an unrecognized format must not be returned in the clear.
+    output = re.sub(r"(\+?\d{2}\s?\d{2}\s?)\d{5}(-\d{4})", r"\1*****\2", phone)
+    return output if output != phone else "+55 ** *****-****"
 
 
 def get_sanitized_customer_data(customer_id: int) -> dict:
@@ -79,17 +81,17 @@ def get_sanitized_customer_data(customer_id: int) -> dict:
         "dti": result[7],
     }
 
-    return data 
+    return data
 
 if __name__ == "__main__":
     print("\n==================================================")
     print("RUNNING FULL SECURITY & PII MASKING TEST SUITE")
     print("==================================================")
-    
+
     # 1. Test across all Anchor Customers (101 - 104)
     print("\n--- TEST 1: DuckDB Anchor Profile Queries & PII Masking ---")
     anchor_ids = [101, 102, 103, 104]
-    
+
     for c_id in anchor_ids:
         sample = get_sanitized_customer_data(c_id)
         if sample:
