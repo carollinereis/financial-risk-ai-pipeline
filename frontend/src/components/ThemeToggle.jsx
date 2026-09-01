@@ -1,34 +1,69 @@
 // src/components/ThemeToggle.jsx
-import React from 'react';
+import React, { useState } from 'react';
+import { Moon, Sun } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
 export function ThemeToggle() {
   const { theme, toggle } = useTheme();
+  const [hovered, setHovered] = useState(false);
+
+  // The icon names the destination, not the current state: in dark mode the Sun
+  // is the way out of it. The aria-label says the same thing in words, so the
+  // button is unambiguous whether it is seen or heard.
+  const isDark = theme === 'dark';
+  const nextTheme = isDark ? 'light' : 'dark';
+  const Icon = isDark ? Sun : Moon;
 
   return (
-    <button 
-      onClick={toggle} 
-      style={toggleStyles.button}
-      aria-label="Toggle visual theme"
-      title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+    <button
+      type="button"
+      onClick={toggle}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setHovered(true)}
+      onBlur={() => setHovered(false)}
+      style={{
+        ...toggleStyles.button,
+        ...(hovered ? toggleStyles.buttonHover : null),
+      }}
+      aria-label={`Switch to ${nextTheme} theme`}
+      title={`Switch to ${nextTheme} theme`}
     >
-      {theme === 'dark' ? 'Light' : 'Dark'}
+      <Icon
+        size={16}
+        aria-hidden="true"
+        style={{
+          ...toggleStyles.icon,
+          // A small rotation on hover reads as the dial it is, without animating
+          // the swap itself — the icon change must stay instant to feel responsive.
+          transform: hovered ? 'rotate(25deg)' : 'rotate(0deg)',
+        }}
+      />
     </button>
   );
 }
 
 const toggleStyles = {
   button: {
-    background: 'var(--surface-hover)',
-    color: 'var(--text-primary)',
-    border: '1px solid var(--border)',
-    borderRadius: '20px',
-    padding: '6px 14px',
-    fontSize: '12px',
-    fontWeight: '600',
-    cursor: 'pointer',
+    width: '34px',
+    height: '34px',
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
-  }
+    justifyContent: 'center',
+    background: 'var(--surface)',
+    color: 'var(--text-secondary)',
+    border: '1px solid var(--border)',
+    borderRadius: '50%',
+    padding: 0,
+    cursor: 'pointer',
+    transition: 'background 140ms ease, border-color 140ms ease, color 140ms ease',
+  },
+  buttonHover: {
+    background: 'var(--surface-hover)',
+    borderColor: 'var(--accent)',
+    color: 'var(--accent)',
+  },
+  icon: {
+    transition: 'transform 180ms ease',
+  },
 };

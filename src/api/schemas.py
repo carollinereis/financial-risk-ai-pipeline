@@ -47,3 +47,54 @@ class AuditResultResponse(BaseModel):
     decision: str = "MANUAL REVIEW REQUIRED"
     risk_tier: str = "HIGH"
     qual_assessment: str = "MEDIUM"
+
+
+# ------------------------------------------------------------------
+# Evaluated Customers Registry Row DTO
+# ------------------------------------------------------------------
+class CustomerRegistryItem(BaseModel):
+    customer_id: int
+    full_name: str
+    credit_score: int
+    risk_score: float | None = None
+    application_id: int | None = None
+    # Standing verdict on the latest application; null until the committee has run.
+    decision_status: str | None = None
+    cro_verdict: str | None = None
+    human_overridden: bool = False
+    overridden_by: str | None = None
+    last_analyzed_at: str | None = None
+    has_saved_audit: bool = False
+    # True when the three agents did not agree, so policy rather than consensus
+    # settled the file.
+    committee_split: bool = False
+    # The XGBoost probability as it stood when the committee ran. Divergence from
+    # risk_score means the model has re-scored the client since.
+    audit_risk_score: float | None = None
+
+
+# ------------------------------------------------------------------
+# Persisted Audit Transcript DTO (read-only replay, no pipeline run)
+# ------------------------------------------------------------------
+class SavedAuditResponse(BaseModel):
+    customer_id: int
+    application_id: int
+    decision: str
+    human_overridden: bool = False
+    override_notes: str | None = None
+    overridden_by: str | None = None
+    overridden_at: str | None = None
+    last_analyzed_at: str | None = None
+    xgb_risk_score: float = 0.0
+    quant_verdict: str | None = None
+    qual_verdict: str | None = None
+    cro_verdict: str | None = None
+    quant_analysis: str = ""
+    qual_analysis: str = ""
+    cro_decision: str = ""
+    # One line per agent explaining how the verdict was reached, including any
+    # deterministic policy override that contradicts the agent's own prose.
+    quant_basis: str | None = None
+    qual_basis: str | None = None
+    cro_basis: str | None = None
+    execution_time_ms: int = 0

@@ -1,8 +1,9 @@
 // src/components/Navbar.jsx
 import React from 'react';
+import { CustomerSearch } from './CustomerSearch';
 import { ThemeToggle } from './ThemeToggle';
 
-export function Navbar({ customers, selectedId, onSelectCustomer }) {
+export function Navbar({ customers, onSelectCustomer }) {
   return (
     <header style={navStyles.header}>
       <div>
@@ -11,27 +12,10 @@ export function Navbar({ customers, selectedId, onSelectCustomer }) {
       </div>
 
       <div style={navStyles.actions}>
-        {/* Customer Selector Dropdown */}
-        <div style={navStyles.selectWrapper}>
-          <label style={navStyles.label}>Select Client:</label>
-          <select
-            style={navStyles.select}
-            value={selectedId ?? ''}
-            disabled={customers.length === 0}
-            onChange={(e) => onSelectCustomer(e.target.value ? Number(e.target.value) : null)}
-          >
-            {/* Placeholder keeps a distinct "nothing open" value, so re-picking the
-                client whose drawer was just closed still fires onChange. */}
-            <option value="">
-              {customers.length === 0 ? 'No clients loaded' : '\u2014 Select client \u2014'}
-            </option>
-            {customers.map(c => (
-              <option key={c.customer_id} value={c.customer_id}>
-                ID {c.customer_id} - {c.full_name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Quick search replaces the native select: the portfolio is too long to
+            scan in a dropdown, and a client's analysis status is what decides
+            whether opening them costs an LLM run. */}
+        <CustomerSearch customers={customers} onSelectCustomer={onSelectCustomer} />
 
         <ThemeToggle />
       </div>
@@ -64,27 +48,4 @@ const navStyles = {
     alignItems: 'center',
     gap: '16px',
   },
-  selectWrapper: {
-    background: 'var(--surface)',
-    border: '1px solid var(--border)',
-    borderRadius: '8px',
-    padding: '6px 12px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  label: {
-    fontSize: '11px',
-    color: 'var(--text-secondary)',
-    textTransform: 'uppercase',
-  },
-  select: {
-    background: 'transparent',
-    border: 'none',
-    color: 'var(--accent)',
-    fontWeight: '600',
-    fontSize: '13px',
-    cursor: 'pointer',
-    outline: 'none',
-  }
 };

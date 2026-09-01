@@ -9,7 +9,9 @@ from src.domain.entities import (
     INSUFFICIENT_DATA,
     AuditResult,
     RiskEvaluationResult,
+    assess_behavioral_floor,
     derive_behavioral_floor,
+    explain_behavioral_verdict,
     parse_behavioral_assessment,
     reconcile_behavioral_assessment,
 )
@@ -244,3 +246,50 @@ class TestInsufficientDataNeverApproves:
     def test_parser_recognises_the_abstention(self):
         report = "**BEHAVIORAL RISK ASSESSMENT:** INSUFFICIENT DATA"
         assert parse_behavioral_assessment(report) == INSUFFICIENT_DATA
+
+
+class TestVerdictBasis:
+    """The stored vote must be able to explain itself, override included."""
+
+    def test_floor_reason_names_the_threshold_that_produced_it(self):
+        tier, reason = assess_behavioral_floor(delinquencies=0, employment_length_years=1)
+        assert tier == "MEDIUM"
+        assert "1 year of employment" in reason
+        assert "2-year threshold" in reason
+
+    def test_floor_reason_pluralises_employment_years(self):
+        _, reason = assess_behavioral_floor(delinquencies=0, employment_length_years=8)
+        assert "8 years of employment" in reason
+
+    def test_missing_record_reason_states_what_is_absent(self):
+        tier, reason = assess_behavioral_floor(delinquencies=0, employment_length_years=None)
+        assert tier == INSUFFICIENT_DATA
+        assert "not recorded" in reason
+
+    def test_override_explanation_names_both_readings(self):
+        """The John Santos case: agent says LOW, one year of employment floors it."""
+        basis = explain_behavioral_verdict("LOW", "MEDIUM", "1 year of employment", "MEDIUM")
+        assert "Agent assessed LOW" in basis
+        assert "raised it to MEDIUM" in basis
+        assert "1 year of employment" in basis
+
+    def test_agreement_is_stated_without_implying_an_override(self):
+        basis = explain_behavioral_verdict("HIGH", "HIGH", "3 delinquencies", "HIGH")
+        assert "record concurs" in basis
+        assert "raised" not in basis
+
+    def test_model_escalation_above_the_floor_is_attributed_to_the_agent(self):
+        basis = explain_behavioral_verdict("HIGH", "LOW", "zero delinquencies", "HIGH")
+        assert "above the record's LOW floor" in basis
+
+    def test_cro_escalation_is_recorded_and_explained(self):
+        report = "**DECISION:** APPROVED\n**RISK TIER:** LOW"
+        result = RiskEvaluationResult.from_cro_report(report, quant_standing="CRITICAL RISK")
+        assert result.policy_escalated is True
+        assert "policy escalated" in result.explain()
+
+    def test_uncontested_cro_decision_is_not_marked_as_escalated(self):
+        report = "**DECISION:** APPROVED\n**RISK TIER:** LOW"
+        result = RiskEvaluationResult.from_cro_report(report, quant_standing="LOW RISK")
+        assert result.policy_escalated is False
+        assert "policy escalated" not in result.explain()

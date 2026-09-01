@@ -5,7 +5,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from src.api.schemas import AuditResultResponse, CustomerListItem, CustomerProfileResponse
+from src.api.schemas import (
+    AuditResultResponse,
+    CustomerListItem,
+    CustomerProfileResponse,
+    CustomerRegistryItem,
+    SavedAuditResponse,
+)
 from src.application.run_risk_audit import RunRiskAuditUseCase
 from src.domain.policy import policy_reference
 from src.infra.agents.agent_tools import (
@@ -16,10 +22,12 @@ from src.infra.config import DUCKDB_PATH
 from src.infra.database.database import (
     fetch_agent_consensus_stats,
     fetch_agent_divergence,
+    fetch_customer_registry,
     fetch_decision_distribution,
     fetch_executive_kpis,
     fetch_hitl_exception_queue,
     fetch_risk_profile_distribution,
+    fetch_saved_audit,
     init_portfolio_tables,
     record_human_override,
     seed_sample_agent_analytics,
@@ -59,6 +67,10 @@ ALLOWED_OVERRIDE_STATUSES = {"APPROVED", "REJECTED"}
 class HumanOverrideRequest(BaseModel):
     status: str  # e.g., 'APPROVED' or 'REJECTED'
     rationale: str
+    # Who is signing for the ruling. Self-declared: the dashboard has no auth, so
+    # this attributes the decision without authenticating it. Required all the same
+    # so no override can enter the trail anonymously.
+    underwriter: str
 
 @app.get("/customers", response_model=list[CustomerListItem])
 def list_customers():
@@ -100,6 +112,22 @@ def get_customer_profile(customer_id: int):
     )
 
 
+@app.get("/customers/{customer_id}/audit", response_model=SavedAuditResponse)
+def get_saved_audit(customer_id: int):
+    """Replay the stored committee transcript. Never invokes the agent pipeline."""
+    try:
+        saved = fetch_saved_audit(customer_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching saved audit: {str(e)}") from e
+
+    if saved is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No saved audit recorded for customer ID {customer_id}.",
+        )
+    return SavedAuditResponse(**saved)
+
+
 @app.post("/customers/{customer_id}/audit", response_model=AuditResultResponse)
 def run_audit(customer_id: int):
     """Trigger multi-agent risk audit committee pipeline."""
@@ -131,6 +159,15 @@ def get_dashboard_kpis():
         return fetch_executive_kpis()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching executive KPIs: {str(e)}") from e
+
+
+@app.get("/api/dashboard/customer-registry", response_model=list[CustomerRegistryItem])
+def get_customer_registry():
+    """Fetch every customer with the standing verdict and date of their last audit."""
+    try:
+        return fetch_customer_registry()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching customer registry: {str(e)}") from e
 
 
 @app.get("/api/dashboard/agent-analytics")
@@ -201,13 +238,21 @@ def override_human_decision(application_id: int, payload: HumanOverrideRequest):
     if not rationale:
         raise HTTPException(status_code=422, detail="An override rationale is required for the audit trail.")
 
+    underwriter = payload.underwriter.strip()
+    if not underwriter:
+        raise HTTPException(
+            status_code=422,
+            detail="An underwriter name is required so the override is attributable.",
+        )
+
     try:
-        record_human_override(application_id, status, rationale)
+        record_human_override(application_id, status, rationale, underwriter)
 
         return {
             "message": "Decision successfully updated",
             "application_id": application_id,
-            "new_status": status
+            "new_status": status,
+            "overridden_by": underwriter,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating decision: {str(e)}") from e

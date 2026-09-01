@@ -4,11 +4,11 @@
     "type": "split",
     "children": [
       {
-        "id": "7839e69231eee038",
+        "id": "37548ed9c8bcc019",
         "type": "tabs",
         "children": [
           {
-            "id": "5d1fa770703f26f7",
+            "id": "788c9aaa16ec300b",
             "type": "leaf",
             "state": {
               "type": "markdown",
@@ -188,15 +188,29 @@
       "bases:Create new base": false
     }
   },
-  "active": "5d1fa770703f26f7",
+  "active": "788c9aaa16ec300b",
   "lastOpenFiles": [
-    "memory/architectural-decisions.md",
-    "memory/active-context.md",
-    "memory/dashboard-spec.md",
-    "front-end-roadmap.md",
     "FastAPI_Back_React_guide.md",
+    "front-end-roadmap.md",
+    "memory/active-context.md",
+    "testing-and-security.md",
+    "phase7_Frontend_Integration",
+    "phase6_FastAPI + Pydantic",
+    "phase5_End-to-End.md",
+    "memory/dashboard-spec.md",
+    "memory/architectural-decisions.md",
+    "images/post_img2.png",
+    "images/post_img1.png",
+    "images/frontEnd_test1.png",
+    "images/102_quant.png",
+    "images/102_qual.png",
+    "images/102_img1.png",
+    "images/102_exec_decision.png",
+    "images/101_quant.png",
+    "images/101_qual.png",
+    "images/101_img1.png",
+    "memory/runbook.md",
     "phase1_setup.md",
-    "FastAPI_Back_React.md",
-    "testing-and-security.md"
+    "FastAPI_Back_React.md"
   ]
 }

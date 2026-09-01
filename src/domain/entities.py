@@ -75,31 +75,76 @@ def extract_labelled_value(label: str, text: str, allowed: tuple[str, ...]) -> s
     return None
 
 
-def derive_behavioral_floor(
+def _years(count: int) -> str:
+    return f"{count} year" if count == 1 else f"{count} years"
+
+
+def assess_behavioral_floor(
     delinquencies: int | None, employment_length_years: int | None
-) -> str:
-    """Computes the behavioural tier from the structured record alone.
+) -> tuple[str, str]:
+    """Computes the behavioural tier from the structured record, with its reason.
 
     These thresholds are stated in the qualitative agent's prompt as deterministic,
     but an LLM asked to compare integers can and does get them wrong. The record is
     already structured, so the tier is computed here and used as a floor the model
     cannot undercut.
+
+    The reason travels with the tier so a verdict that contradicts the agent's own
+    prose can say which threshold produced it, rather than appearing unexplained.
     """
     try:
         delinquency_count = int(delinquencies)
         employment_years = int(employment_length_years)
     except (TypeError, ValueError):
         # Nothing verifiable in the record: abstain rather than assume a clean file.
-        return INSUFFICIENT_DATA
+        return INSUFFICIENT_DATA, "delinquency count or employment length not recorded"
 
     if delinquency_count < 0 or employment_years < 0:
-        return INSUFFICIENT_DATA
+        return INSUFFICIENT_DATA, "record holds a negative delinquency count or employment length"
 
-    if delinquency_count >= 2 or (delinquency_count == 1 and employment_years < 2):
-        return "HIGH"
-    if delinquency_count == 1 or employment_years < 2:
-        return "MEDIUM"
-    return "LOW"
+    if delinquency_count >= 2:
+        return "HIGH", f"{delinquency_count} delinquencies in the last 2 years"
+    if delinquency_count == 1 and employment_years < 2:
+        return "HIGH", (
+            f"1 delinquency combined with {_years(employment_years)} of employment, "
+            "under the 2-year threshold"
+        )
+    if delinquency_count == 1:
+        return "MEDIUM", "1 delinquency in the last 2 years"
+    if employment_years < 2:
+        return "MEDIUM", (
+            f"{_years(employment_years)} of employment, under the 2-year threshold"
+        )
+    return "LOW", f"zero delinquencies and {_years(employment_years)} of employment"
+
+
+def derive_behavioral_floor(
+    delinquencies: int | None, employment_length_years: int | None
+) -> str:
+    """Returns only the tier the structured record establishes."""
+    return assess_behavioral_floor(delinquencies, employment_length_years)[0]
+
+
+def explain_behavioral_verdict(
+    model_assessment: str, floor: str, floor_reason: str, final: str
+) -> str:
+    """States how the stored qualitative verdict was reached.
+
+    The committee's prose is the model's unmodified reading, so when policy floors
+    it the report and the recorded vote disagree on their face. This sentence is
+    what makes that disagreement legible instead of looking like a defect.
+    """
+    if final != model_assessment:
+        return (
+            f"Agent assessed {model_assessment}; policy floor raised it to {final} "
+            f"({floor_reason})."
+        )
+    if model_assessment != floor:
+        return (
+            f"Agent assessed {model_assessment}, above the record's {floor} floor "
+            f"({floor_reason})."
+        )
+    return f"Agent assessed {model_assessment}; record concurs ({floor_reason})."
 
 
 def reconcile_behavioral_assessment(model_assessment: str, floor: str) -> str:
@@ -128,6 +173,9 @@ class RiskEvaluationResult:
     decision: str  # APPROVED, REJECTED, MANUAL REVIEW REQUIRED
     risk_tier: str  # LOW, MEDIUM, HIGH, EXTREME
     rationale: str
+    # True when deterministic policy overruled the CRO's own decision. Recorded so
+    # a verdict that contradicts the report can say so instead of looking wrong.
+    policy_escalated: bool = False
 
     VALID_DECISIONS = ("APPROVED", "REJECTED", "MANUAL REVIEW REQUIRED")
     VALID_TIERS = ("LOW", "MEDIUM", "HIGH", "EXTREME")
@@ -148,13 +196,30 @@ class RiskEvaluationResult:
         # Deterministic policy outranks the LLM. Hard policy 1 in the CRO prompt
         # forbids approving a CRITICAL RISK profile, so if the model does it
         # anyway the case is escalated rather than trusted.
+        policy_escalated = False
         if quant_standing == "CRITICAL RISK" and decision == "APPROVED":
             decision = cls.FALLBACK_DECISION
             # The tier came from the same contradicted report, so it is not
             # trustworthy either; floor it at the conservative default.
             risk_tier = max(risk_tier, cls.FALLBACK_TIER, key=cls.VALID_TIERS.index)
+            policy_escalated = True
 
-        return cls(decision=decision, risk_tier=risk_tier, rationale=text.strip())
+        return cls(
+            decision=decision,
+            risk_tier=risk_tier,
+            rationale=text.strip(),
+            policy_escalated=policy_escalated,
+        )
+
+    def explain(self) -> str:
+        """States how the stored committee decision was reached."""
+        if self.policy_escalated:
+            return (
+                "CRO approved a CRITICAL RISK profile; policy escalated it to "
+                f"{self.decision} at {self.risk_tier} tier."
+            )
+        return f"CRO decided {self.decision} at {self.risk_tier} risk tier."
+
 
 
 @dataclass

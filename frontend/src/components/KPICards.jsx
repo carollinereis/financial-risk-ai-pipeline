@@ -1,12 +1,35 @@
 // src/components/KPICards.jsx
-import React from 'react';
+import React, { useState } from 'react';
 
-export function KPICards({ kpis }) {
+export function KPICards({ kpis, onViewAllCustomers }) {
+  const total = kpis.total ?? 0;
+  const analyzed = kpis.analyzed ?? 0;
+  const coveragePct = total ? Math.round((analyzed / total) * 100) : 0;
+
   return (
     <div style={kpiStyles.grid}>
-      <Card title="Total Customers" value={kpis.total || 0} subtext="Database Records" />
+      <Card
+        title="Total Customers"
+        value={total}
+        subtext="Database Records"
+        action={onViewAllCustomers ? { label: 'View All →', onClick: onViewAllCustomers } : null}
+      />
+      {/* Every rate on this row is computed over the analyzed slice, not the
+          roster. Stating the coverage once, up front, is what keeps the rest of
+          the dashboard honest. */}
+      <Card
+        title="Committee Coverage"
+        value={`${analyzed} / ${total}`}
+        subtext={`${coveragePct}% of clients have a saved audit`}
+      />
       <Card title="Portfolio Avg Credit Score" value={kpis.avgScore || 0} subtext="Weighted Average" />
-      <Card title="Portfolio Approval Rate" value={`${kpis.approvalRate || 65}%`} subtext="Automated Policy" />
+      <Card
+        title="Portfolio Approval Rate"
+        value={`${kpis.approvalRate ?? 0}%`}
+        subtext={`Of ${kpis.totalApplications ?? 0} analyzed application${
+          (kpis.totalApplications ?? 0) === 1 ? '' : 's'
+        }`}
+      />
       <Card 
         title="Avg Decision Time" 
         value={`${kpis.avgTime || 4.2}s`} 
@@ -17,16 +40,51 @@ export function KPICards({ kpis }) {
   );
 }
 
-function Card({ title, value, subtext, highlight }) {
-  return (
-    <div style={{
-      ...kpiStyles.card,
-      borderColor: highlight ? 'var(--accent)' : 'var(--border)'
-    }}>
+// An `action` turns the card into a button: the whole surface is the hit target,
+// so the affordance an underwriter sees (hover lift, pointer, "View All →") and
+// the thing they can actually click are the same rectangle.
+function Card({ title, value, subtext, highlight, action }) {
+  const [hovered, setHovered] = useState(false);
+  const interactive = Boolean(action);
+
+  const cardStyle = {
+    ...kpiStyles.card,
+    borderColor: highlight ? 'var(--accent)' : 'var(--border)',
+    ...(interactive ? kpiStyles.interactive : null),
+    ...(interactive && hovered ? kpiStyles.interactiveHover : null),
+  };
+
+  const body = (
+    <>
       <span style={kpiStyles.title}>{title}</span>
       <div style={kpiStyles.value}>{value}</div>
-      <span style={kpiStyles.subtext}>{subtext}</span>
-    </div>
+      <div style={kpiStyles.footer}>
+        <span style={kpiStyles.subtext}>{subtext}</span>
+        {interactive && (
+          <span style={{ ...kpiStyles.actionLabel, opacity: hovered ? 1 : 0.75 }}>
+            {action.label}
+          </span>
+        )}
+      </div>
+    </>
+  );
+
+  if (!interactive) {
+    return <div style={cardStyle}>{body}</div>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={action.onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setHovered(true)}
+      onBlur={() => setHovered(false)}
+      style={{ ...cardStyle, textAlign: 'left', font: 'inherit' }}
+    >
+      {body}
+    </button>
   );
 }
 
@@ -46,6 +104,15 @@ const kpiStyles = {
     flexDirection: 'column',
     justifyContent: 'space-between',
   },
+  interactive: {
+    cursor: 'pointer',
+    transition: 'transform 120ms ease, border-color 120ms ease, background 120ms ease',
+  },
+  interactiveHover: {
+    borderColor: 'var(--accent)',
+    background: 'var(--surface-hover)',
+    transform: 'translateY(-2px)',
+  },
   title: {
     fontSize: '12px',
     color: 'var(--text-secondary)',
@@ -57,8 +124,21 @@ const kpiStyles = {
     color: 'var(--text-primary)',
     margin: '8px 0 4px 0',
   },
+  footer: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '8px',
+  },
   subtext: {
     fontSize: '10px',
     color: 'var(--text-secondary)',
+  },
+  actionLabel: {
+    fontSize: '10px',
+    fontWeight: '700',
+    color: 'var(--accent)',
+    whiteSpace: 'nowrap',
+    transition: 'opacity 120ms ease',
   }
 };
