@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "memory/active-context.md",
+                "file": "memory/runbook.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "active-context"
+              "title": "runbook"
             }
           }
         ]
@@ -190,9 +190,9 @@
   },
   "active": "788c9aaa16ec300b",
   "lastOpenFiles": [
+    "memory/active-context.md",
     "FastAPI_Back_React_guide.md",
     "front-end-roadmap.md",
-    "memory/active-context.md",
     "testing-and-security.md",
     "phase7_Frontend_Integration",
     "phase6_FastAPI + Pydantic",
