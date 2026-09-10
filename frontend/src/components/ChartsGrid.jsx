@@ -1,8 +1,6 @@
 // src/components/ChartsGrid.jsx
 import { useState, useEffect, useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { CustomerRiskScoreHistoryChart } from './CustomerRiskScoreHistoryChart';
-import { CustomerScoreHistoryChart } from './CustomerScoreHistoryChart';
 import { gridStyles, tooltipStyle } from './chartStyles';
 import { useChartColors } from '../hooks/useChartColors';
 import { API_BASE } from '../config';
@@ -19,22 +17,14 @@ const json = (res, route) => {
   return res.json();
 };
 
-export function ChartsGrid({ customers = [], refreshKey = 0, selectedCustomerId = null }) {
+// Portfolio-level decision split. Always describes the whole analyzed slice of
+// the portfolio - it never filters to a selected customer.
+export function ChartsGrid({ customers = [], refreshKey = 0 }) {
   const colors = useChartColors();
   const [decisions, setDecisions] = useState(null);
   const [consensus, setConsensus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  // A client picked here just for the charts below, independent of opening their
-  // full drawer. Opening a client elsewhere (search/registry/queue) takes over again -
-  // adjusted during render (React's recommended pattern) rather than via an effect.
-  const [chartCustomerId, setChartCustomerId] = useState(null);
-  const [prevSelectedCustomerId, setPrevSelectedCustomerId] = useState(selectedCustomerId);
-  if (selectedCustomerId !== prevSelectedCustomerId) {
-    setPrevSelectedCustomerId(selectedCustomerId);
-    setChartCustomerId(null);
-  }
-  const effectiveCustomerId = chartCustomerId ?? selectedCustomerId;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -81,89 +71,59 @@ export function ChartsGrid({ customers = [], refreshKey = 0, selectedCustomerId 
   }, [decisions, colors]);
 
   return (
-    <>
-      <div style={gridStyles.selectorRow}>
-        <label htmlFor="chart-customer-select" style={gridStyles.selectorLabel}>
-          Client for score charts:
-        </label>
-        <select
-          id="chart-customer-select"
-          value={effectiveCustomerId ?? ''}
-          onChange={(e) => setChartCustomerId(e.target.value ? Number(e.target.value) : null)}
-          style={gridStyles.selectorSelect}
-        >
-          <option value="">Select a client...</option>
-          {customers.map((c) => (
-            <option key={c.customer_id} value={c.customer_id}>
-              {c.full_name} (#{c.customer_id})
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div style={gridStyles.container}>
-        {/* 1. Agent committee consensus vs divergence */}
-        <div style={gridStyles.card}>
-          <h3 style={gridStyles.title}>
-            Portfolio Decision Split
-            <span style={gridStyles.subtitleStack}>
-              {consensus ? (
-                <span style={gridStyles.subtitle}>
-                  {consensus.consensus_rate_pct}% agent agreement · {consensus.pending_review_count} pending review
-                </span>
-              ) : null}
-              {/* The donut covers only clients the committee has ruled on. Without the
-                  denominator it reads as the whole portfolio, which it is not. */}
-              {decisions ? (
-                <span style={gridStyles.subtitle}>
-                  Based on {decisions.total_applications} of {customers.length} clients analyzed
-                </span>
-              ) : null}
+    <div style={gridStyles.card}>
+      <h3 style={gridStyles.title}>
+        Portfolio Decision Split
+        <span style={gridStyles.subtitleStack}>
+          {consensus ? (
+            <span style={gridStyles.subtitle}>
+              {consensus.consensus_rate_pct}% agent agreement · {consensus.pending_review_count} pending review
             </span>
-          </h3>
+          ) : null}
+          {/* The donut covers only clients the committee has ruled on. Without the
+              denominator it reads as the whole portfolio, which it is not. */}
+          {decisions ? (
+            <span style={gridStyles.subtitle}>
+              Based on {decisions.total_applications} of {customers.length} clients analyzed
+            </span>
+          ) : null}
+        </span>
+      </h3>
 
-          {loading ? (
-            <div style={gridStyles.placeholder}>Loading decision metrics...</div>
-          ) : error ? (
-            <div style={gridStyles.placeholderError}>Failed to load decision data: {error}</div>
-          ) : decisionData.length === 0 ? (
-            <div style={gridStyles.placeholder}>No decision data available</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie
-                  data={decisionData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  paddingAngle={4}
-                  dataKey="value"
-                  nameKey="name"
-                >
-                  {decisionData.map((entry) => (
-                    <Cell key={entry.name} fill={entry.fill} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={tooltipStyle(colors)}
-                  formatter={(value, name, entry) => [
-                    `${value} (${entry?.payload?.share ?? 0}%)`,
-                    name,
-                  ]}
-                />
-                <Legend verticalAlign="bottom" height={36} />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        {/* 2. Selected client's historical credit score */}
-        <CustomerScoreHistoryChart customerId={effectiveCustomerId} refreshKey={refreshKey} />
-
-        {/* 3. Selected client's risk score per audit run */}
-        <CustomerRiskScoreHistoryChart customerId={effectiveCustomerId} refreshKey={refreshKey} />
-      </div>
-    </>
+      {loading ? (
+        <div style={gridStyles.placeholder}>Loading decision metrics...</div>
+      ) : error ? (
+        <div style={gridStyles.placeholderError}>Failed to load decision data: {error}</div>
+      ) : decisionData.length === 0 ? (
+        <div style={gridStyles.placeholder}>No decision data available</div>
+      ) : (
+        <ResponsiveContainer width="100%" height={250}>
+          <PieChart>
+            <Pie
+              data={decisionData}
+              cx="50%"
+              cy="50%"
+              innerRadius={60}
+              outerRadius={90}
+              paddingAngle={4}
+              dataKey="value"
+              nameKey="name"
+            >
+              {decisionData.map((entry) => (
+                <Cell key={entry.name} fill={entry.fill} />
+              ))}
+            </Pie>
+            <Tooltip
+              contentStyle={tooltipStyle(colors)}
+              formatter={(value, name, entry) => [
+                `${value} (${entry?.payload?.share ?? 0}%)`,
+                name,
+              ]}
+            />
+            <Legend verticalAlign="bottom" height={36} />
+          </PieChart>
+        </ResponsiveContainer>
+      )}
+    </div>
   );
 }

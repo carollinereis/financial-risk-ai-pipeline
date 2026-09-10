@@ -17,7 +17,4 @@ export const gridStyles = {
   subtitleStack: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px', textAlign: 'right' },
   placeholder: { height: '250px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '13px' },
   placeholderError: { height: '250px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--status-rejected)', fontSize: '13px', textAlign: 'center', padding: '0 12px' },
-  selectorRow: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' },
-  selectorLabel: { fontSize: '12px', color: 'var(--text-secondary)' },
-  selectorSelect: { background: 'var(--surface)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '6px 10px', fontSize: '13px', minWidth: '220px' },
 };
