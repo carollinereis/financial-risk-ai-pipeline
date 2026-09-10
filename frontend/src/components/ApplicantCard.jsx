@@ -25,7 +25,7 @@ export function ApplicantCard({ profile, error, audit, onOpenReport, onClear }) 
     );
   }
 
-  const { audit: report, loading, taskStatus, auditError, runAudit } = audit;
+  const { audit: report, loading, taskStatus, auditError, justCompleted, runAudit } = audit;
   const decision = report?.decision;
 
   return (
@@ -68,7 +68,15 @@ export function ApplicantCard({ profile, error, audit, onOpenReport, onClear }) 
         <Field label="Delinquencies (2yr)" value={profile.delinquencies_2yrs} />
       </div>
 
-      {auditError && <div style={cardStyles.banner}>{auditError}</div>}
+      {justCompleted && !auditError && (
+        <div style={cardStyles.confirmation}>Audit complete: {justCompleted}</div>
+      )}
+
+      {auditError && (
+        <div style={cardStyles.banner}>
+          <strong>Audit failed.</strong> {auditError}
+        </div>
+      )}
 
       <div style={cardStyles.actions}>
         <button type="button" onClick={runAudit} disabled={loading} style={cardStyles.auditBtn}>
@@ -76,9 +84,11 @@ export function ApplicantCard({ profile, error, audit, onOpenReport, onClear }) 
             ? taskStatus === 'PROCESSING'
               ? 'Running audit…'
               : 'Queued…'
-            : report
-              ? 'Re-run committee audit'
-              : 'Run committee audit'}
+            : auditError
+              ? 'Try again'
+              : report
+                ? 'Re-run committee audit'
+                : 'Run committee audit'}
         </button>
         <button type="button" onClick={onOpenReport} style={cardStyles.reportBtn}>
           Open full report
@@ -147,6 +157,19 @@ const cardStyles = {
   },
   fieldLabel: { display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '2px' },
   fieldValue: { fontSize: '15px', fontWeight: '700' },
+  // Neutral accent, not a status color: this confirms the run finished, not
+  // that the verdict is good news - a REJECTED outcome would misread as
+  // positive framing if this reused the green "approved" status color.
+  confirmation: {
+    background: 'var(--bg)',
+    border: '1px solid var(--accent)',
+    borderRadius: '6px',
+    padding: '10px 12px',
+    fontSize: '12px',
+    fontWeight: '600',
+    color: 'var(--accent)',
+    marginBottom: '12px',
+  },
   banner: {
     background: 'var(--bg)',
     border: '1px solid var(--status-rejected)',

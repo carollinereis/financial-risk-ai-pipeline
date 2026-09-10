@@ -38,7 +38,7 @@ const DRIFT_EPSILON = 0.005;
 
 export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
   const { profile } = useCustomerProfile(customerId);
-  const { audit, auditSource, loadingSaved, loading, taskStatus, auditError, runAudit } =
+  const { audit, auditSource, loadingSaved, loading, taskStatus, auditError, justCompleted, runAudit } =
     useCommitteeAudit(customerId, onAuditComplete);
 
   const lastAnalyzed = formatDate(audit?.last_analyzed_at);
@@ -126,10 +126,18 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
                 ? taskStatus === 'PROCESSING'
                   ? "Running Multi-Agent Audit..."
                   : "Queued..."
-                : audit
-                  ? "Re-run Multi-Agent Audit"
-                  : "Run Executive AI Audit"}
+                : auditError
+                  ? "Try again"
+                  : audit
+                    ? "Re-run Multi-Agent Audit"
+                    : "Run Executive AI Audit"}
             </button>
+
+            {justCompleted && !auditError && (
+              <div style={{ ...drawerStyles.banner, borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+                Audit complete: {justCompleted}
+              </div>
+            )}
 
             {auditError && (
               <div style={{ ...drawerStyles.banner, borderColor: 'var(--status-rejected)' }}>

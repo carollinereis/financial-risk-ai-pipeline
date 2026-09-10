@@ -60,4 +60,20 @@ def run_audit_task(customer_id: int, task_id: str) -> None:
         with get_session() as session:
             task = session.get(AuditTask, task_id)
             task.status = "FAILED"
-            task.error = str(exc)
+            task.error = _describe_failure(exc)
+
+
+# The Ollama client re-raises the raw socket/HTTP error (e.g. a bare
+# "[Errno 61] Connection refused" or an httpx timeout), not a message an
+# underwriter should have to decode. Sniffed by keyword rather than exception
+# type, since that stays correct across langchain/ollama/httpx version bumps -
+# any of them can be the one that actually raises. The real text is never
+# dropped: an unrecognized failure still reports itself in full.
+def _describe_failure(exc: Exception) -> str:
+    message = str(exc)
+    lowered = message.lower()
+    if "connection refused" in lowered or "econnrefused" in lowered or "connect call failed" in lowered:
+        return "Couldn't reach the local model. Is Ollama running?"
+    if "timeout" in lowered or "timed out" in lowered:
+        return "The local model took too long to respond. Try again in a moment."
+    return f"The audit failed unexpectedly: {message}"
