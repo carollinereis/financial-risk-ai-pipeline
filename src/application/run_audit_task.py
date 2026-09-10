@@ -8,7 +8,12 @@ exists at all, since DuckDB's agent_evaluations deliberately keeps only the curr
 
 from src.api.schemas import AuditResultResponse
 from src.application.run_risk_audit import RunRiskAuditUseCase
-from src.infra.database.database import fetch_customer_by_id
+from src.infra.database.database import (
+    CRO_DECISION_TO_VERDICT,
+    QUAL_ASSESSMENT_TO_VERDICT,
+    QUANT_STANDING_TO_VERDICT,
+    fetch_customer_by_id,
+)
 from src.infra.database.postgres.models import AuditTask, CreditHistoryEntry, RiskScoreHistoryEntry
 from src.infra.database.postgres.session import get_session
 
@@ -30,6 +35,14 @@ def run_audit_task(customer_id: int, task_id: str) -> None:
             decision=result.decision,
             risk_tier=result.risk_tier,
             qual_assessment=result.qual_assessment,
+            # Same mapping record_audit_results uses to persist each agent's vote,
+            # so a fresh run's verdict badges match what a reload would show.
+            quant_verdict=QUANT_STANDING_TO_VERDICT.get(result.quant_standing, "ALERT"),
+            qual_verdict=QUAL_ASSESSMENT_TO_VERDICT.get(result.qual_assessment, "ALERT"),
+            cro_verdict=CRO_DECISION_TO_VERDICT.get(result.decision, "ALERT"),
+            quant_basis=result.quant_basis,
+            qual_basis=result.qual_basis,
+            cro_basis=result.cro_basis,
         )
 
         customer = fetch_customer_by_id(customer_id)

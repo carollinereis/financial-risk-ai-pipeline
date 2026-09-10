@@ -767,6 +767,95 @@ def fetch_risk_profile_distribution() -> dict:
         }
 
 
+# Standard FICO tiers, upper bound exclusive. Distinct from RISK_BANDS above:
+# these bucket the credit_score input, not the risk_score the model produces.
+CREDIT_SCORE_BANDS = [
+    ("Poor", 300, 580),
+    ("Fair", 580, 670),
+    ("Good", 670, 740),
+    ("Very Good", 740, 800),
+    ("Exceptional", 800, 851),
+]
+
+
+def fetch_credit_score_bands() -> list:
+    """Average XGBoost default probability grouped by FICO credit-score tier."""
+    with get_read_connection() as conn:
+        band_case = " ".join(
+            f"WHEN credit_score >= {low} AND credit_score < {high} THEN '{label}'"
+            for label, low, high in CREDIT_SCORE_BANDS
+        )
+        query = f"""
+            SELECT
+                CASE {band_case} END AS band,
+                COUNT(*) AS customer_count,
+                ROUND(AVG(risk_score), 4) AS avg_default_probability
+            FROM customers
+            WHERE risk_score IS NOT NULL
+            GROUP BY band;
+        """
+        rows = {row["band"]: row for row in conn.execute(query).df().to_dict(orient="records")}
+
+        # Emit every band even when empty so the chart keeps a stable axis.
+        return [
+            {
+                "band": label,
+                "range_label": f"{low}-{high - 1}",
+                "customer_count": int(rows.get(label, {}).get("customer_count", 0)),
+                "avg_default_probability": float(
+                    rows.get(label, {}).get("avg_default_probability") or 0.0
+                ),
+            }
+            for label, low, high in CREDIT_SCORE_BANDS
+        ]
+
+
+def fetch_portfolio_highlights(limit: int = 5) -> dict:
+    """Top-N clients by default probability and by requested loan size, plus the
+    portfolio-wide averages the customer view compares one applicant against.
+    """
+    with get_read_connection() as conn:
+        top_risk_query = """
+            SELECT customer_id, full_name, CAST(risk_score AS DOUBLE) AS risk_score,
+                   CAST(loan_amount_requested AS DOUBLE) AS loan_amount_requested
+            FROM customers
+            WHERE risk_score IS NOT NULL
+            ORDER BY risk_score DESC, customer_id
+            LIMIT ?;
+        """
+        top_risk = conn.execute(top_risk_query, [limit]).df().to_dict(orient="records")
+
+        top_loans_query = """
+            SELECT customer_id, full_name, CAST(loan_amount_requested AS DOUBLE) AS loan_amount_requested,
+                   CAST(risk_score AS DOUBLE) AS risk_score
+            FROM customers
+            WHERE loan_amount_requested IS NOT NULL
+            ORDER BY loan_amount_requested DESC, customer_id
+            LIMIT ?;
+        """
+        top_loans = conn.execute(top_loans_query, [limit]).df().to_dict(orient="records")
+
+        averages_query = """
+            SELECT
+                ROUND(AVG(credit_score), 1) AS avg_credit_score,
+                ROUND(AVG(debt_to_income_ratio), 4) AS avg_debt_to_income_ratio,
+                ROUND(AVG(risk_score), 4) AS avg_default_probability
+            FROM customers
+            WHERE risk_score IS NOT NULL;
+        """
+        averages = conn.execute(averages_query).fetchone()
+
+        return {
+            "top_default_risk": top_risk,
+            "top_loan_amounts": top_loans,
+            "portfolio_averages": {
+                "avg_credit_score": float(averages[0] or 0.0),
+                "avg_debt_to_income_ratio": float(averages[1] or 0.0),
+                "avg_default_probability": float(averages[2] or 0.0),
+            },
+        }
+
+
 # The dashboard charts group on these three verdicts, so each agent's native
 # vocabulary is mapped onto them before it is stored.
 QUANT_STANDING_TO_VERDICT = {

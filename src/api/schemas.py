@@ -46,6 +46,15 @@ class AuditResultResponse(BaseModel):
     decision: str = "MANUAL REVIEW REQUIRED"
     risk_tier: str = "HIGH"
     qual_assessment: str = "MEDIUM"
+    # Same shape as SavedAuditResponse's verdict/basis fields below, so a freshly
+    # completed run and a replayed one render identically - a UI that reads one
+    # must not silently go blank reading the other.
+    quant_verdict: str | None = None
+    qual_verdict: str | None = None
+    cro_verdict: str | None = None
+    quant_basis: str | None = None
+    qual_basis: str | None = None
+    cro_basis: str | None = None
 
 
 # ------------------------------------------------------------------

@@ -1,6 +1,6 @@
 // src/components/CustomerDrawer.jsx
-import { useEffect, useRef, useState } from 'react';
-import { API_BASE } from '../config';
+import { useCommitteeAudit } from '../hooks/useCommitteeAudit';
+import { useCustomerProfile } from '../hooks/useCustomerProfile';
 import { AgentReport } from './AgentReport';
 
 const DECISION_COLORS = {
@@ -36,121 +36,10 @@ const STALE_AFTER_DAYS = 14;
 // them; the saved value is persisted to two decimals as a percentage.
 const DRIFT_EPSILON = 0.005;
 
-// The committee takes up to ~90s (3 sequential LLM calls); poll rather than block.
-const POLL_INTERVAL_MS = 2000;
-const POLL_TIMEOUT_MS = 3 * 60 * 1000;
-
 export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
-  const [profile, setProfile] = useState(null);
-  const [audit, setAudit] = useState(null);
-  // Distinguishes a replayed transcript from one produced by the run just made,
-  // so the header can state which the underwriter is reading.
-  const [auditSource, setAuditSource] = useState(null);
-  const [loadingSaved, setLoadingSaved] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [taskStatus, setTaskStatus] = useState(null);
-  const [auditError, setAuditError] = useState(null);
-
-  useEffect(() => {
-    if (!customerId) return;
-
-    const controller = new AbortController();
-    fetch(`${API_BASE}/customers/${customerId}`, { signal: controller.signal })
-      .then(res => {
-        if (!res.ok) throw new Error(`GET /customers/${customerId} -> ${res.status}`);
-        return res.json();
-      })
-      .then(data => setProfile(data))
-      .catch(err => {
-        if (err.name !== 'AbortError') console.error("Failed to load customer profile:", err);
-      });
-
-    // The saved transcript is a plain DuckDB read: opening a file never spends an
-    // LLM call, so the committee's last verdict is on screen immediately. A 404
-    // simply means this client has not been through the committee yet.
-    fetch(`${API_BASE}/customers/${customerId}/audit`, { signal: controller.signal })
-      .then(res => {
-        if (res.status === 404) return null;
-        if (!res.ok) throw new Error(`GET /customers/${customerId}/audit -> ${res.status}`);
-        return res.json();
-      })
-      .then(data => {
-        if (data) {
-          setAudit(data);
-          setAuditSource('saved');
-        }
-        setLoadingSaved(false);
-      })
-      .catch(err => {
-        if (err.name !== 'AbortError') {
-          console.error("Failed to load saved audit:", err);
-          setLoadingSaved(false);
-        }
-      });
-
-    // Switching clients fast must not let a slow earlier response overwrite a newer one.
-    return () => controller.abort();
-  }, [customerId]);
-
-  // Cleared on unmount so a stale poll never fires after the drawer closes (the
-  // component remounts per client via `key={inspectedId}` in App.jsx).
-  const pollRef = useRef(null);
-  useEffect(() => () => clearInterval(pollRef.current), []);
-
-  const pollTask = (taskId, deadline) => {
-    fetch(`${API_BASE}/tasks/${taskId}`)
-      .then(res => {
-        if (!res.ok) throw new Error(`GET /tasks/${taskId} -> ${res.status}`);
-        return res.json();
-      })
-      .then(data => {
-        setTaskStatus(data.status);
-
-        if (data.status === 'COMPLETED') {
-          clearInterval(pollRef.current);
-          setAudit(data.result);
-          setAuditSource('fresh');
-          setLoading(false);
-          // An audit writes decision_status, so the aggregate views are now stale.
-          onAuditComplete?.();
-        } else if (data.status === 'FAILED') {
-          clearInterval(pollRef.current);
-          setAuditError(data.error || 'The audit failed to complete.');
-          setLoading(false);
-        } else if (Date.now() > deadline) {
-          clearInterval(pollRef.current);
-          setAuditError('The audit is taking longer than expected. Try again shortly.');
-          setLoading(false);
-        }
-      })
-      .catch(err => {
-        clearInterval(pollRef.current);
-        console.error("Task polling error:", err);
-        setAuditError(err.message);
-        setLoading(false);
-      });
-  };
-
-  const runAudit = () => {
-    setLoading(true);
-    setAuditError(null);
-    setTaskStatus('PENDING');
-
-    fetch(`${API_BASE}/customers/${customerId}/audit`, { method: 'POST' })
-      .then(res => {
-        if (!res.ok) throw new Error(`POST /customers/${customerId}/audit -> ${res.status}`);
-        return res.json();
-      })
-      .then(({ task_id }) => {
-        const deadline = Date.now() + POLL_TIMEOUT_MS;
-        pollRef.current = setInterval(() => pollTask(task_id, deadline), POLL_INTERVAL_MS);
-      })
-      .catch(err => {
-        console.error("Audit error:", err);
-        setAuditError(err.message);
-        setLoading(false);
-      });
-  };
+  const { profile } = useCustomerProfile(customerId);
+  const { audit, auditSource, loadingSaved, loading, taskStatus, auditError, runAudit } =
+    useCommitteeAudit(customerId, onAuditComplete);
 
   const lastAnalyzed = formatDate(audit?.last_analyzed_at);
   const auditAgeDays = daysSince(audit?.last_analyzed_at);

@@ -2,15 +2,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChartsGrid } from './components/ChartsGrid';
 import { gridStyles } from './components/chartStyles';
+import { CreditScoreBandChart } from './components/CreditScoreBandChart';
 import { CustomerDrawer } from './components/CustomerDrawer';
 import { CustomerRegistry } from './components/CustomerRegistry';
-import { CustomerRiskScoreHistoryChart } from './components/CustomerRiskScoreHistoryChart';
-import { CustomerScoreHistoryChart } from './components/CustomerScoreHistoryChart';
 import { CustomerSidebar } from './components/CustomerSidebar';
+import { CustomerView } from './components/CustomerView';
 import { ExceptionQueue } from './components/ExceptionQueue';
 import { KPICards } from './components/KPICards';
 import { Navbar } from './components/Navbar';
 import { PolicyReference } from './components/PolicyReference';
+import { PortfolioHighlights } from './components/PortfolioHighlights';
 
 const API_BASE = 'http://localhost:8000';
 
@@ -150,13 +151,19 @@ function App() {
         <div style={appStyles.main}>
           {selectedCustomer ? (
             <CustomerView
-              customer={selectedCustomer}
+              key={selectedCustomer.customer_id}
+              customerId={selectedCustomer.customer_id}
               refreshKey={dataVersion}
+              onAuditComplete={handleDataChange}
               onOpenReport={() => setOpenReportId(selectedCustomer.customer_id)}
               onClear={clearSelection}
             />
           ) : (
-            <ChartsGrid customers={customers} refreshKey={dataVersion} />
+            <div style={gridStyles.container}>
+              <ChartsGrid customers={customers} refreshKey={dataVersion} />
+              <CreditScoreBandChart refreshKey={dataVersion} />
+              <PortfolioHighlights refreshKey={dataVersion} />
+            </div>
           )}
         </div>
       </div>
@@ -177,38 +184,6 @@ function App() {
         onClose={() => setOpenReportId(null)}
         onAuditComplete={handleDataChange}
       />
-    </div>
-  );
-}
-
-// Phase 1 stand-in for the full applicant card (built in Phase 2): proves the
-// portfolio/customer view switch and reuses the two history charts, which
-// already work per-customer without any new backend surface.
-function CustomerView({ customer, refreshKey, onOpenReport, onClear }) {
-  return (
-    <div style={appStyles.customerView}>
-      <div style={appStyles.customerHead}>
-        <div>
-          <h2 style={appStyles.customerName}>{customer.full_name}</h2>
-          <span style={appStyles.customerMeta}>
-            #{customer.customer_id} · Credit score {customer.credit_score} ·{' '}
-            {customer.has_saved_audit ? customer.decision_status : 'Not analyzed'}
-          </span>
-        </div>
-        <div style={appStyles.customerActions}>
-          <button type="button" style={appStyles.reportBtn} onClick={onOpenReport}>
-            Open full report
-          </button>
-          <button type="button" style={appStyles.backBtn} onClick={onClear}>
-            ← Back to portfolio
-          </button>
-        </div>
-      </div>
-
-      <div style={gridStyles.container}>
-        <CustomerScoreHistoryChart customerId={customer.customer_id} refreshKey={refreshKey} />
-        <CustomerRiskScoreHistoryChart customerId={customer.customer_id} refreshKey={refreshKey} />
-      </div>
     </div>
   );
 }
@@ -237,46 +212,6 @@ const appStyles = {
     marginBottom: '24px',
   },
   main: { minWidth: 0 },
-  customerView: {
-    background: 'var(--surface)',
-    border: '1px solid var(--border)',
-    borderRadius: '12px',
-    padding: '20px',
-    marginBottom: '20px',
-  },
-  customerHead: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    flexWrap: 'wrap',
-    gap: '12px',
-    marginBottom: '16px',
-    paddingBottom: '14px',
-    borderBottom: '1px solid var(--border)',
-  },
-  customerName: { margin: 0, fontSize: '18px', color: 'var(--text-primary)' },
-  customerMeta: { fontSize: '12px', color: 'var(--text-secondary)' },
-  customerActions: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
-  reportBtn: {
-    background: 'var(--accent)',
-    color: 'var(--bg)',
-    border: 'none',
-    borderRadius: '6px',
-    padding: '8px 14px',
-    fontSize: '12px',
-    fontWeight: '700',
-    cursor: 'pointer',
-  },
-  backBtn: {
-    background: 'transparent',
-    color: 'var(--text-secondary)',
-    border: '1px solid var(--border)',
-    borderRadius: '6px',
-    padding: '8px 14px',
-    fontSize: '12px',
-    fontWeight: '600',
-    cursor: 'pointer',
-  },
 };
 
 export default App;

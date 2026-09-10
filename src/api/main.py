@@ -27,10 +27,12 @@ from src.infra.config import DUCKDB_PATH
 from src.infra.database.database import (
     fetch_agent_consensus_stats,
     fetch_agent_divergence,
+    fetch_credit_score_bands,
     fetch_customer_registry,
     fetch_decision_distribution,
     fetch_executive_kpis,
     fetch_hitl_exception_queue,
+    fetch_portfolio_highlights,
     fetch_risk_profile_distribution,
     fetch_saved_audit,
     init_portfolio_tables,
@@ -291,6 +293,28 @@ def get_risk_profile():
         return fetch_risk_profile_distribution()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching risk profile: {str(e)}") from e
+
+
+@app.get("/api/dashboard/credit-score-bands")
+def get_credit_score_bands():
+    """Fetch average default probability grouped by FICO credit-score tier."""
+    try:
+        return fetch_credit_score_bands()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching credit score bands: {str(e)}"
+        ) from e
+
+
+@app.get("/api/dashboard/portfolio-highlights")
+def get_portfolio_highlights(limit: int = 5):
+    """Fetch the top-N default-risk and largest-loan clients, plus portfolio averages."""
+    try:
+        return fetch_portfolio_highlights(limit=limit)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching portfolio highlights: {str(e)}"
+        ) from e
 
 
 @app.patch("/api/dashboard/override/{application_id}")

@@ -330,6 +330,13 @@ class AuditResult:
     decision: str = "MANUAL REVIEW REQUIRED"
     risk_tier: str = "HIGH"
     qual_assessment: str = FALLBACK_BEHAVIORAL_ASSESSMENT
+    # One-line explanation per agent (see run_risk_audit.py's `bases`), carried on
+    # the result so a freshly completed audit can show them immediately, the same
+    # as a saved-and-reread one - without this a fresh run's basis lines are
+    # computed and persisted, but never reach the response that names the run.
+    quant_basis: str | None = None
+    qual_basis: str | None = None
+    cro_basis: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -342,4 +349,7 @@ class AuditResult:
             "decision": self.decision,
             "risk_tier": self.risk_tier,
             "qual_assessment": self.qual_assessment,
+            "quant_basis": self.quant_basis,
+            "qual_basis": self.qual_basis,
+            "cro_basis": self.cro_basis,
         }

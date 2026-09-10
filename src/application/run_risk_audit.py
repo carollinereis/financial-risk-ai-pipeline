@@ -121,4 +121,7 @@ class RunRiskAuditUseCase:
             decision=evaluation.decision,
             risk_tier=evaluation.risk_tier,
             qual_assessment=qual_assessment,
+            quant_basis=bases.get("quant"),
+            qual_basis=bases.get("qual"),
+            cro_basis=bases.get("cro"),
         )
