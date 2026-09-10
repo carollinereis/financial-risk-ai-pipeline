@@ -1,5 +1,5 @@
 // src/components/CustomerSidebar.jsx
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const VERDICT_COLORS = {
   APPROVED: 'var(--status-approved)',
@@ -78,6 +78,29 @@ export function CustomerSidebar({
     }
     moveFocus(currentIndex, event.key === 'ArrowDown' ? 1 : -1);
   };
+
+  // A selection made elsewhere (a Top 5 name, the header search, the registry)
+  // has to actually be visible here for "highlight that customer" to be true -
+  // clear whatever filter/search would be hiding them. Deliberately only keyed
+  // on the id, not the filter/query this itself sets, or it would refight the
+  // underwriter's own filter choice on every render.
+  useEffect(() => {
+    if (selectedCustomerId == null) return;
+    const isVisible = visible.some((c) => c.customer_id === selectedCustomerId);
+    const exists = customers.some((c) => c.customer_id === selectedCustomerId);
+    if (!isVisible && exists) {
+      setFilter('ALL');
+      setQuery('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomerId]);
+
+  // Once the selected row is actually rendered, scroll it into view.
+  useEffect(() => {
+    if (selectedCustomerId == null) return;
+    const index = visible.findIndex((c) => c.customer_id === selectedCustomerId);
+    rowRefs.current[index]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [selectedCustomerId, visible]);
 
   return (
     <div style={sidebarStyles.panel}>

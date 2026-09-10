@@ -5,6 +5,21 @@ import { gridStyles, tooltipStyle } from './chartStyles';
 import { useChartColors } from '../hooks/useChartColors';
 import { API_BASE } from '../config';
 
+// Two-word band names ("Very Good") wrap onto two lines instead of Recharts
+// hiding whichever label doesn't fit its slot.
+function BandAxisTick({ x, y, payload, fill }) {
+  const words = String(payload.value).split(' ');
+  return (
+    <g transform={`translate(${x},${y})`}>
+      {words.map((word, i) => (
+        <text key={word} x={0} y={0} dy={14 + i * 13} textAnchor="middle" fontSize={11} fill={fill}>
+          {word}
+        </text>
+      ))}
+    </g>
+  );
+}
+
 // One magnitude series (average default probability), grouped by FICO tier - a
 // single hue is enough, so this chart carries no legend of its own.
 export function CreditScoreBandChart({ refreshKey = 0 }) {
@@ -33,6 +48,12 @@ export function CreditScoreBandChart({ refreshKey = 0 }) {
     customerCount: row.customer_count,
   }));
 
+  // Clean 10-point ticks instead of stopping at the data max, which clipped
+  // the top label whenever a value landed close to it (e.g. 38.5%).
+  const maxValue = chartData.reduce((max, row) => Math.max(max, row.defaultProbabilityPct), 0);
+  const yCeiling = Math.max(10, Math.ceil(maxValue / 10) * 10);
+  const yTicks = Array.from({ length: yCeiling / 10 + 1 }, (_, i) => i * 10);
+
   return (
     <div style={gridStyles.card}>
       <h3 style={gridStyles.title}>
@@ -48,11 +69,18 @@ export function CreditScoreBandChart({ refreshKey = 0 }) {
         <div style={gridStyles.placeholder}>No scored customers yet</div>
       ) : (
         <ResponsiveContainer width="100%" height={250}>
-          <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <BarChart data={chartData} margin={{ top: 24, right: 10, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={colors.border} vertical={false} />
-            <XAxis dataKey="band" tick={{ fill: colors.textSecondary, fontSize: 11 }} stroke={colors.border} />
+            <XAxis
+              dataKey="band"
+              interval={0}
+              height={40}
+              tick={(props) => <BandAxisTick {...props} fill={colors.textSecondary} />}
+              stroke={colors.border}
+            />
             <YAxis
-              domain={[0, 'dataMax']}
+              domain={[0, yCeiling]}
+              ticks={yTicks}
               tickFormatter={(v) => `${v}%`}
               tick={{ fill: colors.textSecondary, fontSize: 11 }}
               stroke={colors.border}

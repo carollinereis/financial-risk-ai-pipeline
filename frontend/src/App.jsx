@@ -1,7 +1,6 @@
 // src/App.jsx
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChartsGrid } from './components/ChartsGrid';
-import { gridStyles } from './components/chartStyles';
 import { CreditScoreBandChart } from './components/CreditScoreBandChart';
 import { CustomerDrawer } from './components/CustomerDrawer';
 import { CustomerRegistry } from './components/CustomerRegistry';
@@ -159,10 +158,10 @@ function App() {
               onClear={clearSelection}
             />
           ) : (
-            <div style={gridStyles.container}>
-              <ChartsGrid customers={customers} refreshKey={dataVersion} />
+            <div className="portfolio-grid">
+              <ChartsGrid refreshKey={dataVersion} />
               <CreditScoreBandChart refreshKey={dataVersion} />
-              <PortfolioHighlights refreshKey={dataVersion} />
+              <PortfolioHighlights refreshKey={dataVersion} onSelectCustomer={selectCustomer} />
             </div>
           )}
         </div>

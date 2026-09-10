@@ -19,28 +19,19 @@ const json = (res, route) => {
 
 // Portfolio-level decision split. Always describes the whole analyzed slice of
 // the portfolio - it never filters to a selected customer.
-export function ChartsGrid({ customers = [], refreshKey = 0 }) {
+export function ChartsGrid({ refreshKey = 0 }) {
   const colors = useChartColors();
   const [decisions, setDecisions] = useState(null);
-  const [consensus, setConsensus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    const opts = { signal: controller.signal };
 
-    Promise.all([
-      fetch(`${API_BASE}/api/dashboard/decision-distribution`, opts).then((r) =>
-        json(r, '/api/dashboard/decision-distribution'),
-      ),
-      fetch(`${API_BASE}/api/dashboard/agent-consensus`, opts).then((r) =>
-        json(r, '/api/dashboard/agent-consensus'),
-      ),
-    ])
-      .then(([decisionData, consensusData]) => {
+    fetch(`${API_BASE}/api/dashboard/decision-distribution`, { signal: controller.signal })
+      .then((r) => json(r, '/api/dashboard/decision-distribution'))
+      .then((decisionData) => {
         setDecisions(decisionData);
-        setConsensus(consensusData);
         setLoading(false);
       })
       .catch((err) => {
@@ -72,23 +63,7 @@ export function ChartsGrid({ customers = [], refreshKey = 0 }) {
 
   return (
     <div style={gridStyles.card}>
-      <h3 style={gridStyles.title}>
-        Portfolio Decision Split
-        <span style={gridStyles.subtitleStack}>
-          {consensus ? (
-            <span style={gridStyles.subtitle}>
-              {consensus.consensus_rate_pct}% agent agreement · {consensus.pending_review_count} pending review
-            </span>
-          ) : null}
-          {/* The donut covers only clients the committee has ruled on. Without the
-              denominator it reads as the whole portfolio, which it is not. */}
-          {decisions ? (
-            <span style={gridStyles.subtitle}>
-              Based on {decisions.total_applications} of {customers.length} clients analyzed
-            </span>
-          ) : null}
-        </span>
-      </h3>
+      <h3 style={gridStyles.title}>Portfolio Decision Split</h3>
 
       {loading ? (
         <div style={gridStyles.placeholder}>Loading decision metrics...</div>

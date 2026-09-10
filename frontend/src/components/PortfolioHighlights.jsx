@@ -9,7 +9,7 @@ const pct = (value) => `${((value ?? 0) * 100).toFixed(1)}%`;
 // Two Top-5 rankings, each a small set of bars scaled to its own max - never
 // sharing an axis with the other, since default probability and loan size are
 // different units.
-export function PortfolioHighlights({ refreshKey = 0 }) {
+export function PortfolioHighlights({ refreshKey = 0, onSelectCustomer }) {
   const colors = useChartColors();
   const { data, loading, error } = usePortfolioHighlights(refreshKey);
 
@@ -23,6 +23,7 @@ export function PortfolioHighlights({ refreshKey = 0 }) {
         valueOf={(row) => row.risk_score}
         format={pct}
         barColor={colors.rejected}
+        onSelectCustomer={onSelectCustomer}
       />
       <RankedList
         title="Top 5 Largest Requested Loans"
@@ -32,12 +33,13 @@ export function PortfolioHighlights({ refreshKey = 0 }) {
         valueOf={(row) => row.loan_amount_requested}
         format={currency}
         barColor={colors.accent}
+        onSelectCustomer={onSelectCustomer}
       />
     </>
   );
 }
 
-function RankedList({ title, loading, error, rows, valueOf, format, barColor }) {
+function RankedList({ title, loading, error, rows, valueOf, format, barColor, onSelectCustomer }) {
   const list = rows ?? [];
   const max = list.length ? Math.max(...list.map(valueOf)) : 0;
 
@@ -61,9 +63,14 @@ function RankedList({ title, loading, error, rows, valueOf, format, barColor }) 
                 <span style={listStyles.rank}>{index + 1}</span>
                 <div style={listStyles.body}>
                   <div style={listStyles.rowHead}>
-                    <span style={listStyles.name}>
+                    <button
+                      type="button"
+                      className="top5-name-btn"
+                      style={listStyles.name}
+                      onClick={() => onSelectCustomer?.(row.customer_id)}
+                    >
                       {row.full_name} <span style={listStyles.id}>#{row.customer_id}</span>
-                    </span>
+                    </button>
                     <span style={listStyles.value}>{format(value)}</span>
                   </div>
                   <div style={listStyles.track}>
