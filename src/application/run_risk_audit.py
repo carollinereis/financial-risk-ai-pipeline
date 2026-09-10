@@ -7,7 +7,11 @@ from src.domain.entities import (
     parse_behavioral_assessment,
     reconcile_behavioral_assessment,
 )
-from src.domain.policy import UnderwritingPolicy
+from src.domain.policy import (
+    UnderwritingPolicy,
+    explain_quantitative_standing,
+    scan_note_triggers,
+)
 from src.infra.agents.agents import run_audit_committee
 from src.infra.config import MODEL_PATH
 from src.infra.database.database import (
@@ -66,8 +70,14 @@ class RunRiskAuditUseCase:
         # model's reading is floored by deterministic policy the same way the CRO's
         # decision is floored by quant_standing above.
         model_assessment = parse_behavioral_assessment(reports.get("qual_analysis", ""))
+        # Scanned from the sanitized text, so an injected instruction cannot manufacture
+        # a flag and PII never reaches the matcher.
+        note_flags = scan_note_triggers(sanitized_notes)
         behavioral_floor, floor_reason = assess_behavioral_floor(
-            profile.delinquencies, profile.employment_length_years
+            profile.delinquencies,
+            profile.employment_length_years,
+            profile.credit_score,
+            note_flags,
         )
         qual_assessment = reconcile_behavioral_assessment(model_assessment, behavioral_floor)
 
@@ -75,9 +85,10 @@ class RunRiskAuditUseCase:
         # policy overruled an agent, the stored report and the stored vote disagree
         # on their face; these lines are what make that legible downstream.
         bases = {
-            "quant": (
-                f"XGBoost default probability {risk_score * 100:.2f}% against policy "
-                f"thresholds -> {quant_standing}."
+            "quant": explain_quantitative_standing(
+                credit_score=profile.credit_score,
+                dti=profile.dti,
+                xgb_score=risk_score,
             ),
             "qual": explain_behavioral_verdict(
                 model_assessment, behavioral_floor, floor_reason, qual_assessment

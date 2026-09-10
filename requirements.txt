@@ -17,6 +17,7 @@ streamlit>=1.30.0
 # LLM agents (requires a local Ollama server running llama3.1)
 langchain-ollama>=0.1.0
 langchain-core>=0.2.0
+python-dotenv>=1.0.0  # loads LANGSMITH_* vars from .env for tracing
 
 # Dev tooling
 ruff>=0.16.0

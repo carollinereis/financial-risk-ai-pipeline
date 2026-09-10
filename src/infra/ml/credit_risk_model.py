@@ -19,10 +19,15 @@ FEATURE_COLUMNS = [
     "loan_amount_requested",
     "employment_length_years"
 ]
+TARGET_COLUMN_CANDIDATES = [
+    "is_high_risk",
+    "default_status",
+    "loan_status_defaulted",
+    "is_default",
+]
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
 CV_FOLDS = 5
-HIGH_RISK_THRESHOLD = 0.65
 MODEL_VERSION = "xgb_v1"
 
 
@@ -52,8 +57,15 @@ class CreditRiskModel:
         return df[FEATURE_COLUMNS]
 
     def prepare_labels(self, df: pd.DataFrame) -> pd.Series:
-        """Extracts ground-truth target label y."""
-        return df["is_high_risk"]
+        """Extracts ground-truth target label based on historical default tracking."""
+        for column in TARGET_COLUMN_CANDIDATES:
+            if column in df.columns:
+                return df[column].astype(int)
+
+        raise KeyError(
+            f"No target label column found. Expected one of {TARGET_COLUMN_CANDIDATES}, "
+            f"got columns: {list(df.columns)}"
+        )
 
     def evaluate(self, X: pd.DataFrame, y: pd.Series):
         """Holdout evaluation comparing Random Forest vs. XGBoost."""
@@ -78,9 +90,10 @@ class CreditRiskModel:
         xgb_auc = roc_auc_score(y_test, xgb_proba)
         print(f"XGBoost Classifier ROC-AUC Score: {xgb_auc:.4f}")
 
-        # Classification Metrics at Threshold
-        xgb_preds = (xgb_proba >= HIGH_RISK_THRESHOLD).astype(int)
-        print(f"\nXGBoost Classification Metrics (Threshold = {HIGH_RISK_THRESHOLD}):")
+        # Operational Policy Threshold (Using 5% standard baseline instead of 65%)
+        OPERATIONAL_THRESHOLD = 0.05
+        xgb_preds = (xgb_proba >= OPERATIONAL_THRESHOLD).astype(int)
+        print(f"\nXGBoost Classification Metrics (Operational Threshold = {OPERATIONAL_THRESHOLD}):")
         print(classification_report(y_test, xgb_preds, target_names=["Low Risk", "High Risk"]))
 
     def cross_validate(self, X: pd.DataFrame, y: pd.Series):

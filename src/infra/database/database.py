@@ -161,6 +161,42 @@ def seed_sample_agent_analytics():
             """)
 
 
+def reset_audit_runs(reseed: bool = True) -> dict:
+    """Clears every stored audit run so the pipeline can be exercised from a clean slate.
+
+    Drops all agent verdicts and the loan applications they hang off, including any
+    human overrides, then restarts both identity sequences so a fresh run numbers
+    from 1. Customers, their trained risk scores, and the saved model are left
+    alone - this resets what the committee produced, not what it reads.
+
+    ``seed_sample_agent_analytics`` re-seeds fixture rows whenever the evaluations
+    table is empty, and it runs on every API startup. Leaving the table empty
+    therefore does not stay empty; ``reseed`` defaults to True so the result is
+    exactly first-boot state rather than a state the next ``uvicorn`` start would
+    silently change underneath a test.
+    """
+    with get_write_connection() as conn:
+        evaluations = conn.execute("SELECT COUNT(*) FROM agent_evaluations").fetchone()[0]
+        applications = conn.execute("SELECT COUNT(*) FROM loan_applications").fetchone()[0]
+
+        conn.execute("DELETE FROM agent_evaluations")
+        conn.execute("DELETE FROM loan_applications")
+
+        # Without this the next audit's application_id continues from the old high
+        # water mark, so a "clean" run reads as if history had been truncated.
+        conn.execute("CREATE OR REPLACE SEQUENCE seq_applications START 1")
+        conn.execute("CREATE OR REPLACE SEQUENCE seq_evaluations START 1")
+
+    if reseed:
+        seed_sample_agent_analytics()
+
+    return {
+        "evaluations_deleted": int(evaluations),
+        "applications_deleted": int(applications),
+        "reseeded": reseed,
+    }
+
+
 def fetch_executive_kpis() -> dict:
     """Executes aggregate queries over existing customer records and loan applications."""
     with get_read_connection() as conn:
@@ -562,7 +598,7 @@ def backfill_qualitative_basis() -> int:
     with get_write_connection() as conn:
         pending = conn.execute(
             """
-            SELECT e.evaluation_id, e.rationale, c.delinquencies_2yrs, c.employment_length_years
+            SELECT e.evaluation_id, e.rationale, c.delinquencies_2yrs, c.employment_length_years, c.credit_score
             FROM agent_evaluations e
             JOIN loan_applications a ON a.application_id = e.application_id
             JOIN customers c ON c.customer_id = a.customer_id
@@ -571,9 +607,11 @@ def backfill_qualitative_basis() -> int:
         ).fetchall()
 
         filled = 0
-        for evaluation_id, rationale, delinquencies, employment_years in pending:
+        for evaluation_id, rationale, delinquencies, employment_years, credit_score in pending:
             model_assessment = parse_behavioral_assessment(rationale or "")
-            floor, floor_reason = assess_behavioral_floor(delinquencies, employment_years)
+            floor, floor_reason = assess_behavioral_floor(
+                delinquencies, employment_years, credit_score
+            )
             final = reconcile_behavioral_assessment(model_assessment, floor)
             basis = explain_behavioral_verdict(model_assessment, floor, floor_reason, final)
             conn.execute(
@@ -583,6 +621,56 @@ def backfill_qualitative_basis() -> int:
             filled += 1
 
         return filled
+
+
+def backfill_quantitative_basis(rewrite_existing: bool = True) -> int:
+    """Rewrites the quantitative verdict_basis on runs stored before it named the breach.
+
+    Unlike the qualitative backfill, nothing here is reconstructed from prose: the
+    contemporaneous XGBoost score is on the evaluation row (persisted as a
+    percentage) and both hard thresholds come off the customer record, so the line
+    is recomputed from the same inputs the audit used.
+
+    Earlier rows named only the XGBoost score, which reads as the cause even when
+    that score cleared its threshold and a sub-620 credit score or an over-40% DTI
+    was the actual breach. Those lines are wrong rather than missing, so by default
+    this rewrites them; pass rewrite_existing=False to fill only NULLs.
+
+    Returns the number of rows written.
+    """
+    from src.domain.policy import explain_quantitative_standing
+
+    predicate = "" if rewrite_existing else " AND e.verdict_basis IS NULL"
+    with get_write_connection() as conn:
+        pending = conn.execute(
+            f"""
+            SELECT e.evaluation_id, e.agent_score, c.credit_score, c.debt_to_income_ratio
+            FROM agent_evaluations e
+            JOIN loan_applications a ON a.application_id = e.application_id
+            JOIN customers c ON c.customer_id = a.customer_id
+            WHERE e.agent_name = 'Quantitative Agent'{predicate}
+            """
+        ).fetchall()
+
+        written = 0
+        for evaluation_id, agent_score, credit_score, dti in pending:
+            # A row missing either hard-threshold input cannot be recomputed, and a
+            # guessed default would reintroduce the misattribution this fixes.
+            if credit_score is None or dti is None:
+                continue
+            basis = explain_quantitative_standing(
+                credit_score=int(credit_score),
+                dti=float(dti),
+                # agent_score is the XGBoost probability stored as a percentage.
+                xgb_score=float(agent_score or 0.0) / 100.0,
+            )
+            conn.execute(
+                "UPDATE agent_evaluations SET verdict_basis = ? WHERE evaluation_id = ?",
+                [f"{basis} (recomputed from the stored record)", evaluation_id],
+            )
+            written += 1
+
+        return written
 
 
 def record_human_override(

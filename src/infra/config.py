@@ -1,7 +1,12 @@
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # Project Root Resolution (3 levels up: infra -> src -> root)
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+# Populates LANGSMITH_TRACING / LANGSMITH_API_KEY / LANGSMITH_PROJECT for ChatOllama tracing.
+load_dotenv(BASE_DIR / ".env")
 
 # Core Directories
 DATA_DIR = BASE_DIR / "src" / "infra" / "data"
