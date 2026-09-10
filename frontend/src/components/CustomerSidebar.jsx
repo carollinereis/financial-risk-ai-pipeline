@@ -1,5 +1,5 @@
 // src/components/CustomerSidebar.jsx
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 const VERDICT_COLORS = {
   APPROVED: 'var(--status-approved)',
@@ -35,6 +35,12 @@ export function CustomerSidebar({
 }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('ALL');
+  // Roving focus across the row buttons: Up/Down moves it, the browser's own
+  // Enter/Space activates whichever row is focused, same division of labour
+  // CustomerSearch uses for its results list. Bounded by `visible.length`
+  // (a plain render-time value) rather than the ref array's own length, so
+  // nothing ever mutates a ref during render.
+  const rowRefs = useRef([]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -54,6 +60,24 @@ export function CustomerSidebar({
         return rankA - rankB || a.customer_id - b.customer_id;
       });
   }, [customers, query, filter]);
+
+  const moveFocus = (fromIndex, delta) => {
+    const count = visible.length;
+    if (!count) return;
+    const next = (fromIndex + delta + count) % count;
+    rowRefs.current[next]?.focus();
+  };
+
+  const onListKeyDown = (event) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const currentIndex = rowRefs.current.findIndex((el) => el === document.activeElement);
+    event.preventDefault();
+    if (currentIndex === -1) {
+      rowRefs.current[event.key === 'ArrowDown' ? 0 : visible.length - 1]?.focus();
+      return;
+    }
+    moveFocus(currentIndex, event.key === 'ArrowDown' ? 1 : -1);
+  };
 
   return (
     <div style={sidebarStyles.panel}>
@@ -91,7 +115,7 @@ export function CustomerSidebar({
         ))}
       </div>
 
-      <div style={sidebarStyles.list}>
+      <div style={sidebarStyles.list} role="listbox" aria-label="Customers" onKeyDown={onListKeyDown}>
         {loading && <p style={sidebarStyles.empty}>Loading customers…</p>}
         {error && <p style={sidebarStyles.errorBox}>Unavailable: {error}</p>}
         {!loading && !error && visible.length === 0 && (
@@ -99,12 +123,17 @@ export function CustomerSidebar({
         )}
         {!loading &&
           !error &&
-          visible.map((row) => {
+          visible.map((row, index) => {
             const selected = row.customer_id === selectedCustomerId;
             return (
               <button
                 key={row.customer_id}
+                ref={(el) => {
+                  rowRefs.current[index] = el;
+                }}
                 type="button"
+                role="option"
+                aria-selected={selected}
                 onClick={() => onSelect?.(row.customer_id)}
                 style={{
                   ...sidebarStyles.row,

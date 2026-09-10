@@ -25,7 +25,7 @@ export function ApplicantCard({ profile, error, audit, onOpenReport, onClear }) 
     );
   }
 
-  const { audit: report, loading, taskStatus, auditError, justCompleted, runAudit } = audit;
+  const { audit: report, loadingSaved, loading, taskStatus, auditError, justCompleted, runAudit } = audit;
   const decision = report?.decision;
 
   return (
@@ -38,7 +38,9 @@ export function ApplicantCard({ profile, error, audit, onOpenReport, onClear }) 
           </span>
         </div>
         <div style={cardStyles.headActions}>
-          {decision ? (
+          {loadingSaved ? (
+            <span style={{ ...cardStyles.badge, ...cardStyles.badgeMuted }}>Checking…</span>
+          ) : decision ? (
             <span
               style={{ ...cardStyles.badge, background: DECISION_COLORS[decision] || 'var(--text-secondary)' }}
             >

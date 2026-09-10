@@ -18,13 +18,15 @@ const DECISION_COLORS = {
 // costs an LLM run. Reuses the same audit state (and the same runAudit
 // handler) the applicant card's button drives, so both stay in sync.
 export function AgentRecommendations({ audit }) {
-  const { audit: report, loading, taskStatus, runAudit } = audit;
+  const { audit: report, loadingSaved, loading, taskStatus, runAudit } = audit;
 
   return (
     <div style={gridStyles.card}>
       <h3 style={gridStyles.title}>Agent Recommendations</h3>
 
-      {!report ? (
+      {loadingSaved ? (
+        <div style={gridStyles.placeholder}>Checking for a saved audit...</div>
+      ) : !report ? (
         <div style={panelStyles.empty}>
           <p style={panelStyles.emptyText}>
             No committee audit has been recorded for this client yet.

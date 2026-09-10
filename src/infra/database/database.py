@@ -315,15 +315,29 @@ def fetch_agent_divergence() -> list:
         return df.to_dict(orient="records")
 
 
+# The one definition of "the agents disagreed" on an application: three votes
+# that didn't land on the same normalized verdict (REJECT/ALERT/APPROVE, see
+# QUANT_STANDING_TO_VERDICT and friends below). The consensus donut and the
+# HITL queue both start from this exact CTE so neither can drift into a
+# different notion of "disagreed" than the other - the donut counts every
+# application this is true for; the queue narrows it to the ones still open
+# (AND overridden_at IS NULL), a filter on top of the same fact, not a
+# different fact.
+AGENT_SPLIT_CTE = """
+    WITH per_application AS (
+        SELECT application_id, COUNT(DISTINCT decision) AS distinct_decisions
+        FROM agent_evaluations
+        GROUP BY application_id
+    )
+"""
+
+
 def fetch_agent_consensus_stats() -> dict:
     """Aggregates unanimous vs divergent applications to size the HITL workload."""
     with get_read_connection() as conn:
-        query = """
-            WITH per_application AS (
-                SELECT application_id, COUNT(DISTINCT decision) AS distinct_decisions
-                FROM agent_evaluations
-                GROUP BY application_id
-            )
+        query = (
+            AGENT_SPLIT_CTE
+            + """
             SELECT
                 COUNT(*) AS evaluated_applications,
                 COALESCE(SUM(CASE WHEN p.distinct_decisions = 1 THEN 1 ELSE 0 END), 0) AS unanimous,
@@ -333,7 +347,8 @@ def fetch_agent_consensus_stats() -> dict:
                 ), 0) AS pending_review
             FROM per_application p
             LEFT JOIN loan_applications a ON a.application_id = p.application_id;
-        """
+            """
+        )
         res = conn.execute(query).fetchone()
 
         evaluated = res[0] or 0
@@ -357,12 +372,9 @@ def fetch_agent_consensus_stats() -> dict:
 def fetch_hitl_exception_queue() -> list:
     """Lists applications whose agents disagreed, with each agent's vote attached."""
     with get_read_connection() as conn:
-        queue_query = """
-            WITH per_application AS (
-                SELECT application_id, COUNT(DISTINCT decision) AS distinct_decisions
-                FROM agent_evaluations
-                GROUP BY application_id
-            )
+        queue_query = (
+            AGENT_SPLIT_CTE
+            + """
             SELECT
                 a.application_id,
                 a.customer_id,
@@ -377,7 +389,8 @@ def fetch_hitl_exception_queue() -> list:
             WHERE p.distinct_decisions > 1
               AND a.overridden_at IS NULL
             ORDER BY a.created_at DESC;
-        """
+            """
+        )
         applications = conn.execute(queue_query).df().to_dict(orient="records")
         if not applications:
             return []
