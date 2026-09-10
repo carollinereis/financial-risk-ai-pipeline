@@ -74,3 +74,15 @@ fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=llm)
 | `q8_0`/`fp16` model swap | Deferred - user declined | Only Q4_K_M pulled locally; q8_0 is a large download + slower inference. Revisit if hallucination rate under Q4 stays high. |
 | JSON-mode output + Pydantic + `OutputFixingParser` | Deferred - user declined | Breaking change: touches all 3 prompts, `from_cro_report()` text parsing, ~15+ tests asserting on plain-text fields. Worth reconsidering if free-text parsing keeps producing ungrounded CRO verdicts. |
 | Special Llama 3.1 header tags, few-shot examples | Not applicable | `ChatOllama` handles chat-role templating internally; manually inserting `<\|start_header_id\|>` tags would conflict with it. |
+
+---
+
+## Status (2026-09-10)
+
+| Item | Status | Notes |
+| --- | --- | --- |
+| Postgres persistence layer | Done | Additive alongside DuckDB: `Borrower`, `CreditHistoryEntry`, `AuditTask` models under `src/infra/database/postgres/`, Alembic migration, `seed.py` bootstraps borrowers + synthetic history from the existing customer roster. |
+| Async audit worker | Done | `POST /customers/{id}/audit` returns a `task_id` immediately (FastAPI `BackgroundTasks`, no new broker); new `GET /tasks/{id}` for polling. `run_risk_audit.py` untouched. |
+| Historical score chart | Done | New `GET /customers/{id}/score-history`; `ChartsGrid`'s portfolio-wide "Credit Score Distribution" bar chart replaced with a per-selected-customer `CustomerScoreHistoryChart` line chart. |
+| Local dev Postgres volume | Reset | Container had a stale, unrelated schema (`users`/`audit_runs`/`audit_jobs`, unknown origin) from before this session; wiped (`docker compose down -v`) and recreated clean before migrating. |
+| Real user registration (signup/login) | Deferred - user's call | "Registration" for now = seeding `Borrower` rows from existing customer data, not a signup form. |

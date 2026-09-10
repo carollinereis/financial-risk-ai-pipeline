@@ -88,7 +88,7 @@ function App() {
         onInspectCustomer={handleInspect}
       />
 
-      <ChartsGrid customers={customers} refreshKey={dataVersion} />
+      <ChartsGrid customers={customers} refreshKey={dataVersion} selectedCustomerId={inspectedId} />
 
       <PolicyReference />
 

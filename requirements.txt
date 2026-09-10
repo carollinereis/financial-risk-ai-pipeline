@@ -11,6 +11,11 @@ fastapi>=0.115.0
 uvicorn>=0.30.0
 pydantic>=2.0.0
 
+# Postgres persistence (borrower registry, score history, async task state)
+sqlalchemy>=2.0.0
+psycopg[binary]>=3.1.0
+alembic>=1.13.0
+
 # UI (legacy Streamlit app at ./app.py)
 streamlit>=1.30.0
 

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -18,3 +19,6 @@ MODEL_PATH = BASE_DIR / "src" / "infra" / "ml" / "models" / "xgb_model.json"
 
 # Feature & Privacy Flags
 ENABLE_PII_MASKING = True  # Toggle True/False to control PII masking across infra
+
+# Postgres (additive, alongside DuckDB): borrower registry, score history, async task state.
+DATABASE_URL = os.getenv("DATABASE_URL")
