@@ -2,7 +2,7 @@
 
 This is the frontend for a multi-agent credit underwriting engine. Underwriters use it to keep an eye on the portfolio, look into any applicant, run the AI committee on them, and step in when the agents disagree.
 
-[Watch here - Dashboard Demo](./video/Dashboard-Demo.mp4)
+[Watch here - Dashboard Demo](./video/dashboard-memo.mov)
 
 ## What it does
 
