@@ -25,5 +25,4 @@ By automating this multi-layered analysis, bank employees save significant time 
 
 * **Backend & Agent Committee:** Python, FastAPI, LangChain, XGBoost, Llama 3.1 (Ollama)
 * **Database & Infrastructure:** DuckDB, PostgreSQL 16 (Dockerized)
-* **Frontend:** React, Vite, Recharts, Lucide React
-  👉 *See the [`/frontend`](./frontend) directory for UI, architecture overview, and local setup instructions.*
+* **Frontend:** React, Vite, Recharts, Lucide React <br>👉 *See the [`/frontend`](./frontend) directory for UI, architecture overview, and local setup instructions.*
