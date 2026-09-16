@@ -2,7 +2,17 @@
 
 This is the frontend for a multi-agent credit underwriting engine. Underwriters use it to keep an eye on the portfolio, look into any applicant, run the AI committee on them, and step in when the agents disagree.
 
-[Watch here - Dashboard Demo](./video/dashboard-memo.mov)
+[1. Dashboard Overview](./img/dashboard-overview.png)
+
+[2. Hard Policy Override Demonstration](./img/hard-policy-rejection-Alice.png)
+
+[3. Customer Agent Drawer](./img/customer-drawer.png)
+
+[4. Customer Full Agent Report](./img/full-agent-report.png)
+
+[5. Dark mode - Approved Customer](./img/approved-customer-dark-mode.png)
+
+[6. Underwriting Policy for Reference](./img/Underwriting-Policy-Reference.png)
 
 ## What it does
 
