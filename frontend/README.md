@@ -1,4 +1,4 @@
-# AI Risk AI Dashboard
+# Risk AI Dashboard
 
 This is the frontend for a multi-agent credit underwriting engine. Underwriters use it to keep an eye on the portfolio, look into any applicant, run the AI committee on them, and step in when the agents disagree.
 
