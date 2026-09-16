@@ -1,7 +1,13 @@
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 # Project Root Resolution (3 levels up: infra -> src -> root)
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+# Populates LANGSMITH_TRACING / LANGSMITH_API_KEY / LANGSMITH_PROJECT for ChatOllama tracing.
+load_dotenv(BASE_DIR / ".env")
 
 # Core Directories
 DATA_DIR = BASE_DIR / "src" / "infra" / "data"
@@ -13,3 +19,6 @@ MODEL_PATH = BASE_DIR / "src" / "infra" / "ml" / "models" / "xgb_model.json"
 
 # Feature & Privacy Flags
 ENABLE_PII_MASKING = True  # Toggle True/False to control PII masking across infra
+
+# Postgres (additive, alongside DuckDB): borrower registry, score history, async task state.
+DATABASE_URL = os.getenv("DATABASE_URL")

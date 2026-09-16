@@ -1,92 +1,56 @@
-# Financial Risk AI Pipeline — Governance Dashboard (Frontend)
+# Risk AI Dashboard
 
-React + Vite interface for the multi-agent underwriting engine. Underwriters search the
-portfolio, read saved committee reports, and record human overrides against the FastAPI
-backend.
+This is the frontend for a multi-agent credit underwriting engine. Underwriters use it to keep an eye on the portfolio, look into any applicant, run the AI committee on them, and step in when the agents disagree.
 
-## Quick Start
+[1. Dashboard Overview](./img/dashboard-overview.png)
 
-```bash
-npm install
-npm run dev          # http://localhost:5173
-```
+[2. Hard Policy Override Demonstration](./img/hard-policy-rejection-Alice.png)
 
-Requires **Node 20.19+ or 22.12+** and the backend running on `http://localhost:8000`:
+[3. Customer Agent Drawer](./img/customer-drawer.png)
 
-```bash
-uvicorn src.api.main:app --reload    # from the repository root
-```
+[4. Customer Full Agent Report](./img/full-agent-report.png)
 
-| Script | Purpose |
-| --- | --- |
-| `npm run dev` | Vite dev server on :5173 |
-| `npm run build` | Production bundle to `dist/` |
-| `npm run preview` | Serve the built bundle |
-| `npm run lint` | oxlint over `src/` |
+[5. Dark mode - Approved Customer](./img/approved-customer-dark-mode.png)
+
+[6. Underwriting Policy for Reference](./img/Underwriting-Policy-Reference.png)
+
+## What it does
+
+- **Portfolio overview:** Track real-time KPIs, approve/reject splits, default risk by credit score band, and Top 5 lists for riskiest applicants and largest loans.
+- **Customer view:** Inspect applicant profiles, score history, agent recommendations, and portfolio comparisons via sidebar selection or `⌘K` search.
+- **On-demand audits:** Saved reports load instantly; fresh three-agent AI audits run on demand.
+- **Human in the loop:** Split agent decisions automatically route to an exception queue where overrides require a logged reason and operator attribution.
+
+## Prerequisites
+
+* **Node.js:** `v20.19+` or `v22.12+`
+* **Docker & Docker Compose:** Required to run the PostgreSQL database service.
+* **FastAPI Backend:** Running on `http://localhost:8000`
+* **Ollama:** Running locally with `Llama 3.1` (required for generating fresh audits)
+
+## Getting Started
+
+1. **Start the Database Infrastructure** (from repository root):
+   ```bash
+   docker compose up -d postgres
+   ```
+
+2. **Run the Backend** (from the repository root):
+   ```bash
+   uvicorn src.api.main:app --reload
+    ```
+
+3. **Run the Frontend** (from this directory):
+    ```bash
+    npm install
+    npm run dev
+    ```
+
+3. Open `http://localhost:5173` in your browser. Interactive API documentation is available at `http://localhost:8000/docs` while the backend is active.
+
 
 ## Tech Stack
 
-| Concern | Choice |
-| --- | --- |
-| Framework | React 19.2 |
-| Build | Vite 8.2 |
-| Charts | Recharts 3.10 |
-| Icons | lucide-react |
-| Lint | oxlint |
-| HTTP | native `fetch` |
-| Styling | Inline style objects + CSS custom properties (`src/styles/theme.css`) |
-
-Theming is token-based: every colour resolves from `--bg`, `--surface`, `--accent`,
-`--status-*` variables that swap under `[data-theme]`. Charts read the same tokens
-through `useChartColors`, so light and dark stay in step.
-
-## Features
-
-| Feature | Behaviour |
-| --- | --- |
-| **Quick search** (`⌘K` / `Ctrl K`) | Autocomplete over name or `#ID`, keyboard-navigable, with an Analyzed / Not Analyzed badge per result |
-| **Customer registry** | Full roster modal opened from the Total Customers card; filter, search, and per-row CRO verdict, split-committee and drift markers |
-| **Instant report replay** | Opening a client renders the saved committee transcript from DuckDB — no agent run, no LLM cost |
-| **Explicit re-run** | "Re-run Multi-Agent Audit" is the only path that invokes the pipeline |
-| **Verdict basis** | Each agent vote carries the reasoning that produced it, including any deterministic policy override of the agent's own prose |
-| **Drift & staleness** | Warns when the model has re-scored a client since the audit, or when a report has aged past 14 days |
-| **Exception queue** | Committee disagreements pending review; overrides require a rationale and an underwriter name for the audit trail |
-| **Coverage reporting** | KPI row states how much of the portfolio has actually been through the committee, so portfolio rates carry their denominator |
-| **Theme toggle** | Sun / Moon control, persisted to `localStorage`, defaults to the OS preference |
-
-## Structure
-
-```
-src/
-├── App.jsx                    # Roster + KPI fetch, drawer/registry orchestration
-├── config.js                  # API base URL
-├── components/
-│   ├── Navbar.jsx             # Header shell
-│   ├── CustomerSearch.jsx     # ⌘K autocomplete
-│   ├── KPICards.jsx           # Executive KPI row
-│   ├── CustomerRegistry.jsx   # Full-roster modal
-│   ├── CustomerDrawer.jsx     # Profile, saved audit, re-run
-│   ├── AgentReport.jsx        # Renders the agents' loose markdown
-│   ├── ChartsGrid.jsx         # Decision split + score distribution
-│   ├── ExceptionQueue.jsx     # HITL review and overrides
-│   ├── PolicyReference.jsx    # Enforced underwriting thresholds
-│   └── ThemeToggle.jsx
-├── context/ThemeContext.jsx
-├── hooks/useChartColors.js
-└── styles/theme.css
-```
-
-## API Consumed
-
-| Method | Endpoint | Used by |
-| --- | --- | --- |
-| `GET` | `/api/dashboard/customer-registry` | Roster for search, charts, registry |
-| `GET` | `/api/dashboard/kpis` | KPI row |
-| `GET` | `/api/dashboard/decision-distribution` | Decision donut |
-| `GET` | `/api/dashboard/agent-consensus` | Consensus subtitle |
-| `GET` | `/api/dashboard/policy-reference` | Policy thresholds |
-| `GET` | `/api/dashboard/hitl-queue` | Exception queue |
-| `PATCH` | `/api/dashboard/override/{application_id}` | Underwriter override |
-| `GET` | `/customers/{id}` | Drawer profile |
-| `GET` | `/customers/{id}/audit` | Saved transcript (read-only) |
-| `POST` | `/customers/{id}/audit` | Fresh committee run |
+* **Core:** React 19, Vite 8, Recharts, Lucide React
+* **Database:** PostgreSQL 16 (via Docker)
+* **Styling & Config:** Theme colors managed via CSS variables (`src/styles/theme.css`); backend endpoints set in `src/config.js`.

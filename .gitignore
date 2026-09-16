@@ -1,3 +1,5 @@
+node_modules/
+
 .DS_Store
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -242,3 +244,31 @@ venv/
 .env
 # Claude Code personal instructions
 CLAUDE.local.md
+claude/
+.claude/
+
+# Ignore everything inside notes/
+notes/*
+
+# Whitelist images directory so diagrams inside phase guides render properly
+!notes/images/
+!notes/images/*
+
+# Whitelist phase documentation files exclusively
+!notes/phase1_setup.md
+!notes/phase2_sql_database.md
+!notes/phase3_model_security.md
+!notes/phase4_llm_agents.md
+!notes/phase5_End-to-End.md
+!notes/phase6_FastAPI + Pydantic
+!notes/phase7_Frontend_Integration
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+

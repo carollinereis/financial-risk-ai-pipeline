@@ -163,7 +163,11 @@ export function ExceptionQueue({ onInspectCustomer, onDecisionRecorded, refreshK
         <div style={tableStyles.errorBox}>Failed to load exception queue: {error}</div>
       ) : queue.length === 0 ? (
         <div style={tableStyles.empty}>
-          No exceptions pending. Every evaluated application reached a unanimous committee decision.
+          {/* "No open exceptions" is not the same claim as "every vote was unanimous" -
+              a split committee that an underwriter already resolved belongs in neither
+              this queue nor this sentence, so this only ever states the former. */}
+          No exceptions pending. Every open application currently has committee consensus
+          or a recorded underwriter override.
         </div>
       ) : (
         <table style={tableStyles.table}>

@@ -1,18 +1,23 @@
+import uuid
 from contextlib import asynccontextmanager
 
 import duckdb
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from src.api.schemas import (
     AuditResultResponse,
+    AuditTaskStartedResponse,
+    AuditTaskStatusResponse,
     CustomerListItem,
     CustomerProfileResponse,
     CustomerRegistryItem,
+    RiskScoreHistoryPoint,
     SavedAuditResponse,
+    ScoreHistoryPoint,
 )
-from src.application.run_risk_audit import RunRiskAuditUseCase
+from src.application.run_audit_task import run_audit_task
 from src.domain.policy import policy_reference
 from src.infra.agents.agent_tools import (
     get_customer_financial_profile,
@@ -22,16 +27,20 @@ from src.infra.config import DUCKDB_PATH
 from src.infra.database.database import (
     fetch_agent_consensus_stats,
     fetch_agent_divergence,
+    fetch_credit_score_bands,
     fetch_customer_registry,
     fetch_decision_distribution,
     fetch_executive_kpis,
     fetch_hitl_exception_queue,
+    fetch_portfolio_highlights,
     fetch_risk_profile_distribution,
     fetch_saved_audit,
     init_portfolio_tables,
     record_human_override,
     seed_sample_agent_analytics,
 )
+from src.infra.database.postgres.models import AuditTask, CreditHistoryEntry, RiskScoreHistoryEntry
+from src.infra.database.postgres.session import get_session
 
 
 @asynccontextmanager
@@ -46,7 +55,7 @@ app = FastAPI(
     title="Financial Risk AI Pipeline API",
     description="Backend service exposing ML risk scores and Multi-Agent Audit evaluations.",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Enable CORS for Vite dev server (and local testing)
@@ -71,6 +80,7 @@ class HumanOverrideRequest(BaseModel):
     # this attributes the decision without authenticating it. Required all the same
     # so no override can enter the trail anonymously.
     underwriter: str
+
 
 @app.get("/customers", response_model=list[CustomerListItem])
 def list_customers():
@@ -108,7 +118,7 @@ def get_customer_profile(customer_id: int):
         live_xgb_risk_score=float(profile.get("live_xgb_risk_score", 0.0)),
         cpf=profile.get("cpf"),
         email=profile.get("email"),
-        sanitized_notes=notes
+        sanitized_notes=notes,
     )
 
 
@@ -128,28 +138,77 @@ def get_saved_audit(customer_id: int):
     return SavedAuditResponse(**saved)
 
 
-@app.post("/customers/{customer_id}/audit", response_model=AuditResultResponse)
-def run_audit(customer_id: int):
-    """Trigger multi-agent risk audit committee pipeline."""
-    try:
-        use_case = RunRiskAuditUseCase()
-        result = use_case.execute(customer_id)
+@app.post(
+    "/customers/{customer_id}/audit", response_model=AuditTaskStartedResponse, status_code=202
+)
+def run_audit(customer_id: int, background_tasks: BackgroundTasks):
+    """Kicks off the multi-agent risk audit committee pipeline in the background.
 
-        # execute() returns a typed AuditResult, so read its attributes directly.
-        # Pydantic validates the types at the response boundary.
-        return AuditResultResponse(
-            customer_id=result.customer_id,
-            quantitative_standing=result.quant_standing,
-            xgb_risk_score=result.risk_score,
-            cro_decision=result.cro_report,
-            quant_analysis=result.quant_report,
-            qual_analysis=result.qual_report,
-            decision=result.decision,
-            risk_tier=result.risk_tier,
-            qual_assessment=result.qual_assessment,
+    The committee makes 3 sequential LLM calls (up to ~90s); running it inline blocked
+    the whole request. This returns immediately with a task id the client polls via
+    GET /tasks/{task_id} instead.
+    """
+    task_id = uuid.uuid4().hex
+    with get_session() as session:
+        session.add(AuditTask(id=task_id, customer_id=customer_id, status="PENDING"))
+
+    background_tasks.add_task(run_audit_task, customer_id, task_id)
+    return AuditTaskStartedResponse(task_id=task_id, status="PENDING")
+
+
+@app.get("/tasks/{task_id}", response_model=AuditTaskStatusResponse)
+def get_task_status(task_id: str):
+    """Polling endpoint for an async audit task started via POST /customers/{id}/audit."""
+    with get_session() as session:
+        task = session.get(AuditTask, task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
+
+        result = (
+            AuditResultResponse.model_validate_json(task.result_json) if task.result_json else None
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Audit execution error: {str(e)}") from e
+        return AuditTaskStatusResponse(
+            task_id=task.id,
+            status=task.status,
+            result=result,
+            error=task.error,
+        )
+
+
+@app.get("/customers/{customer_id}/score-history", response_model=list[ScoreHistoryPoint])
+def get_score_history(customer_id: int):
+    """Fetches a borrower's historical credit-score points, chronologically."""
+    with get_session() as session:
+        entries = (
+            session.query(CreditHistoryEntry)
+            .filter(CreditHistoryEntry.customer_id == customer_id)
+            .order_by(CreditHistoryEntry.recorded_at)
+            .all()
+        )
+        return [
+            ScoreHistoryPoint(date=entry.recorded_at.date().isoformat(), score=entry.score)
+            for entry in entries
+        ]
+
+
+@app.get("/customers/{customer_id}/risk-score-history", response_model=list[RiskScoreHistoryPoint])
+def get_risk_score_history(customer_id: int):
+    """Fetches a borrower's XGBoost default-probability at each past audit run,
+    chronologically. This is the only place that trend exists - DuckDB's
+    agent_evaluations table deliberately keeps only the current run.
+    """
+    with get_session() as session:
+        entries = (
+            session.query(RiskScoreHistoryEntry)
+            .filter(RiskScoreHistoryEntry.customer_id == customer_id)
+            .order_by(RiskScoreHistoryEntry.recorded_at)
+            .all()
+        )
+        return [
+            RiskScoreHistoryPoint(date=entry.recorded_at.date().isoformat(), score=entry.score)
+            for entry in entries
+        ]
+
 
 # --- Executive Dashboard & AI Ops Endpoints ---
 @app.get("/api/dashboard/kpis")
@@ -158,7 +217,9 @@ def get_dashboard_kpis():
     try:
         return fetch_executive_kpis()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching executive KPIs: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching executive KPIs: {str(e)}"
+        ) from e
 
 
 @app.get("/api/dashboard/customer-registry", response_model=list[CustomerRegistryItem])
@@ -167,7 +228,9 @@ def get_customer_registry():
     try:
         return fetch_customer_registry()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching customer registry: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching customer registry: {str(e)}"
+        ) from e
 
 
 @app.get("/api/dashboard/agent-analytics")
@@ -176,7 +239,9 @@ def get_agent_analytics():
     try:
         return fetch_agent_divergence()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching agent analytics: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching agent analytics: {str(e)}"
+        ) from e
 
 
 @app.get("/api/dashboard/agent-consensus")
@@ -185,7 +250,9 @@ def get_agent_consensus():
     try:
         return fetch_agent_consensus_stats()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching agent consensus: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching agent consensus: {str(e)}"
+        ) from e
 
 
 @app.get("/api/dashboard/policy-reference")
@@ -194,7 +261,9 @@ def get_policy_reference():
     try:
         return policy_reference()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching policy reference: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching policy reference: {str(e)}"
+        ) from e
 
 
 @app.get("/api/dashboard/decision-distribution")
@@ -203,7 +272,9 @@ def get_decision_distribution():
     try:
         return fetch_decision_distribution()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching decision distribution: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching decision distribution: {str(e)}"
+        ) from e
 
 
 @app.get("/api/dashboard/hitl-queue")
@@ -224,6 +295,28 @@ def get_risk_profile():
         raise HTTPException(status_code=500, detail=f"Error fetching risk profile: {str(e)}") from e
 
 
+@app.get("/api/dashboard/credit-score-bands")
+def get_credit_score_bands():
+    """Fetch average default probability grouped by FICO credit-score tier."""
+    try:
+        return fetch_credit_score_bands()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching credit score bands: {str(e)}"
+        ) from e
+
+
+@app.get("/api/dashboard/portfolio-highlights")
+def get_portfolio_highlights(limit: int = 5):
+    """Fetch the top-N default-risk and largest-loan clients, plus portfolio averages."""
+    try:
+        return fetch_portfolio_highlights(limit=limit)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching portfolio highlights: {str(e)}"
+        ) from e
+
+
 @app.patch("/api/dashboard/override/{application_id}")
 def override_human_decision(application_id: int, payload: HumanOverrideRequest):
     """Allows an underwriter to manually approve/reject flagged cases in the HITL queue."""
@@ -236,7 +329,9 @@ def override_human_decision(application_id: int, payload: HumanOverrideRequest):
 
     rationale = payload.rationale.strip()
     if not rationale:
-        raise HTTPException(status_code=422, detail="An override rationale is required for the audit trail.")
+        raise HTTPException(
+            status_code=422, detail="An override rationale is required for the audit trail."
+        )
 
     underwriter = payload.underwriter.strip()
     if not underwriter:

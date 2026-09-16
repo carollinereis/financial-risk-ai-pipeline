@@ -1,4 +1,5 @@
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -79,8 +80,40 @@ def _years(count: int) -> str:
     return f"{count} year" if count == 1 else f"{count} years"
 
 
+# FICO bracket boundaries. POOR is a hard underwriting failure; FAIR is elevated and
+# may never read as a verified-clean file.
+FAIR_CREDIT_FLOOR = 620
+GOOD_CREDIT_FLOOR = 670
+
+
+def credit_bracket_floor(credit_score: int | None) -> tuple[str, str]:
+    """Returns the behavioural tier the FICO bracket alone establishes.
+
+    Range comparisons are exactly what the local model gets wrong: a 650 score was
+    being classified LOW rather than FAIR, so the 620-669 band silently matched no
+    tier at all. Resolved here instead, as a floor.
+    """
+    try:
+        score = int(credit_score)
+    except (TypeError, ValueError):
+        # No score to judge; contributes nothing and lets the record decide.
+        return "LOW", "credit score not recorded"
+
+    if score < FAIR_CREDIT_FLOOR:
+        return "HIGH", f"credit score {score} is below {FAIR_CREDIT_FLOOR} (POOR bracket)"
+    if score < GOOD_CREDIT_FLOOR:
+        return "MEDIUM", (
+            f"credit score {score} sits in the FAIR bracket "
+            f"({FAIR_CREDIT_FLOOR}-{GOOD_CREDIT_FLOOR - 1})"
+        )
+    return "LOW", f"credit score {score} is {GOOD_CREDIT_FLOOR} or above"
+
+
 def assess_behavioral_floor(
-    delinquencies: int | None, employment_length_years: int | None
+    delinquencies: int | None,
+    employment_length_years: int | None,
+    credit_score: int | None = None,
+    note_flags: Sequence[str] | None = None,
 ) -> tuple[str, str]:
     """Computes the behavioural tier from the structured record, with its reason.
 
@@ -91,7 +124,32 @@ def assess_behavioral_floor(
 
     The reason travels with the tier so a verdict that contradicts the agent's own
     prose can say which threshold produced it, rather than appearing unexplained.
+
+    credit_score and note_flags are optional so callers without them keep the
+    delinquency/tenure floor; when supplied, the most severe floor wins.
     """
+    candidates = [
+        _delinquency_floor(delinquencies, employment_length_years),
+        credit_bracket_floor(credit_score),
+        _note_flag_floor(note_flags),
+    ]
+    # Later candidates only win on strict severity, so the delinquency reason survives a tie
+    # and the recorded explanation stays the most specific one available.
+    return max(candidates, key=lambda pair: BEHAVIORAL_SEVERITY[pair[0]])
+
+
+def _note_flag_floor(note_flags: Sequence[str] | None) -> tuple[str, str]:
+    """A behavioural red flag found in the notes can never read as a verified-clean file."""
+    flags = list(note_flags or ())
+    if not flags:
+        return "LOW", "no note-derived red flags"
+    return "MEDIUM", "note-derived red flags: " + ", ".join(flags)
+
+
+def _delinquency_floor(
+    delinquencies: int | None, employment_length_years: int | None
+) -> tuple[str, str]:
+    """The delinquency and tenure half of the floor."""
     try:
         delinquency_count = int(delinquencies)
         employment_years = int(employment_length_years)
@@ -119,10 +177,15 @@ def assess_behavioral_floor(
 
 
 def derive_behavioral_floor(
-    delinquencies: int | None, employment_length_years: int | None
+    delinquencies: int | None,
+    employment_length_years: int | None,
+    credit_score: int | None = None,
+    note_flags: Sequence[str] | None = None,
 ) -> str:
     """Returns only the tier the structured record establishes."""
-    return assess_behavioral_floor(delinquencies, employment_length_years)[0]
+    return assess_behavioral_floor(
+        delinquencies, employment_length_years, credit_score, note_flags
+    )[0]
 
 
 def explain_behavioral_verdict(
@@ -176,9 +239,19 @@ class RiskEvaluationResult:
     # True when deterministic policy overruled the CRO's own decision. Recorded so
     # a verdict that contradicts the report can say so instead of looking wrong.
     policy_escalated: bool = False
+    # The CRO's own decision before an escalation overrode it. Only meaningful
+    # when policy_escalated is True; lets explain() describe which direction
+    # was overruled instead of always narrating the approval-of-critical case.
+    overruled_decision: str | None = None
 
     VALID_DECISIONS = ("APPROVED", "REJECTED", "MANUAL REVIEW REQUIRED")
     VALID_TIERS = ("LOW", "MEDIUM", "HIGH", "EXTREME")
+
+    # The CRO agent persistently reports 'CRITICAL', borrowing the quantitative-standing
+    # vocabulary instead of the tier enum. It is aliased on the way in rather than added to
+    # VALID_TIERS so the domain keeps a single ordered four-rung ladder, which the escalation
+    # floor below indexes into.
+    TIER_ALIASES = {"CRITICAL": "HIGH"}
 
     # Fail-closed defaults: an unreadable committee report must never become an
     # approval, so it lands in the human queue at a conservative tier instead.
@@ -191,17 +264,35 @@ class RiskEvaluationResult:
         text = report or ""
 
         decision = extract_labelled_value("DECISION", text, cls.VALID_DECISIONS) or cls.FALLBACK_DECISION
-        risk_tier = extract_labelled_value("RISK TIER", text, cls.VALID_TIERS) or cls.FALLBACK_TIER
+        raw_tier = extract_labelled_value(
+            "RISK TIER", text, cls.VALID_TIERS + tuple(cls.TIER_ALIASES)
+        )
+        risk_tier = cls.TIER_ALIASES.get(raw_tier, raw_tier) or cls.FALLBACK_TIER
 
         # Deterministic policy outranks the LLM. Hard policy 1 in the CRO prompt
         # forbids approving a CRITICAL RISK profile, so if the model does it
         # anyway the case is escalated rather than trusted.
         policy_escalated = False
+        overruled_decision = None
         if quant_standing == "CRITICAL RISK" and decision == "APPROVED":
+            overruled_decision = decision
             decision = cls.FALLBACK_DECISION
             # The tier came from the same contradicted report, so it is not
             # trustworthy either; floor it at the conservative default.
             risk_tier = max(risk_tier, cls.FALLBACK_TIER, key=cls.VALID_TIERS.index)
+            policy_escalated = True
+        # Symmetric case: Policy 1 only mandates REJECTED when standing is CRITICAL
+        # RISK. A REJECTED verdict against a known SAFE/LOW or MODERATE standing is an
+        # invented hard-policy citation, not a real one - it goes to a human rather
+        # than standing as an automatic rejection. The reported tier is left alone
+        # here because, unlike the approval case, it is not the contradicted claim.
+        elif (
+            quant_standing is not None
+            and quant_standing != "CRITICAL RISK"
+            and decision == "REJECTED"
+        ):
+            overruled_decision = decision
+            decision = cls.FALLBACK_DECISION
             policy_escalated = True
 
         return cls(
@@ -209,13 +300,18 @@ class RiskEvaluationResult:
             risk_tier=risk_tier,
             rationale=text.strip(),
             policy_escalated=policy_escalated,
+            overruled_decision=overruled_decision,
         )
 
     def explain(self) -> str:
         """States how the stored committee decision was reached."""
         if self.policy_escalated:
+            if self.overruled_decision == "APPROVED":
+                cause = "approved a CRITICAL RISK profile"
+            else:
+                cause = "rejected a profile with no hard policy breach"
             return (
-                "CRO approved a CRITICAL RISK profile; policy escalated it to "
+                f"CRO {cause}; policy escalated it to "
                 f"{self.decision} at {self.risk_tier} tier."
             )
         return f"CRO decided {self.decision} at {self.risk_tier} risk tier."
@@ -234,6 +330,13 @@ class AuditResult:
     decision: str = "MANUAL REVIEW REQUIRED"
     risk_tier: str = "HIGH"
     qual_assessment: str = FALLBACK_BEHAVIORAL_ASSESSMENT
+    # One-line explanation per agent (see run_risk_audit.py's `bases`), carried on
+    # the result so a freshly completed audit can show them immediately, the same
+    # as a saved-and-reread one - without this a fresh run's basis lines are
+    # computed and persisted, but never reach the response that names the run.
+    quant_basis: str | None = None
+    qual_basis: str | None = None
+    cro_basis: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -246,4 +349,7 @@ class AuditResult:
             "decision": self.decision,
             "risk_tier": self.risk_tier,
             "qual_assessment": self.qual_assessment,
+            "quant_basis": self.quant_basis,
+            "qual_basis": self.qual_basis,
+            "cro_basis": self.cro_basis,
         }

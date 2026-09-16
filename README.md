@@ -18,12 +18,11 @@ By automating this multi-layered analysis, bank employees save significant time 
 * **Regulatory & Risk Guidelines:** The system follows FICO guidelines to evaluate key risk thresholds including credit score, debt-to-income (DTI) ratio, payment delinquencies, and XGBoost risk scores.
 * **Privacy & Security Guardrails:** Customer records pass through a sanitization layer before reaching the LLM. Sensitive PII, such as Brazilian CPFs, email addresses, and phone numbers is automatically masked, and potential prompt injection attempts are redacted.
 * **Data Architecture:** The system uses DuckDB as an in-memory transactional database. It includes structured test scenarios engineered for definitive approval or rejection outcomes, alongside synthetic data simulating real-world portfolio analytics.
-
+* **Database & Persistence Layer:** Operates DuckDB for in-memory analytical scenario testing combined with a containerized PostgreSQL 16 database for frontend transactional state and application data.
 ---
 
 ## Tech Stack
 
-* **Backend & Agent Committee:** Python, FastAPI, LangChain (Agent Orchestration & State Management), XGBoost, Llama 3 (Ollama)
-* **Database:** DuckDB
-* **Frontend:** React, Vite
-  * *Note: The current frontend serves as a functional MVP built with React and Recharts; enhanced UI designs and components are actively in development.*
+* **Backend & Agent Committee:** Python, FastAPI, LangChain, XGBoost, Llama 3.1 (Ollama)
+* **Database & Infrastructure:** DuckDB, PostgreSQL 16 (Dockerized)
+* **Frontend:** React, Vite, Recharts, Lucide React <br>👉 *See the [`/frontend`](./frontend) directory for UI, architecture overview, and local setup instructions.*

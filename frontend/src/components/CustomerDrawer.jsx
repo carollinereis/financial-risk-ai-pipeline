@@ -1,6 +1,6 @@
 // src/components/CustomerDrawer.jsx
-import { useState, useEffect } from 'react';
-import { API_BASE } from '../config';
+import { useCommitteeAudit } from '../hooks/useCommitteeAudit';
+import { useCustomerProfile } from '../hooks/useCustomerProfile';
 import { AgentReport } from './AgentReport';
 
 const DECISION_COLORS = {
@@ -37,71 +37,9 @@ const STALE_AFTER_DAYS = 14;
 const DRIFT_EPSILON = 0.005;
 
 export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
-  const [profile, setProfile] = useState(null);
-  const [audit, setAudit] = useState(null);
-  // Distinguishes a replayed transcript from one produced by the run just made,
-  // so the header can state which the underwriter is reading.
-  const [auditSource, setAuditSource] = useState(null);
-  const [loadingSaved, setLoadingSaved] = useState(true);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!customerId) return;
-
-    const controller = new AbortController();
-    fetch(`${API_BASE}/customers/${customerId}`, { signal: controller.signal })
-      .then(res => {
-        if (!res.ok) throw new Error(`GET /customers/${customerId} -> ${res.status}`);
-        return res.json();
-      })
-      .then(data => setProfile(data))
-      .catch(err => {
-        if (err.name !== 'AbortError') console.error("Failed to load customer profile:", err);
-      });
-
-    // The saved transcript is a plain DuckDB read: opening a file never spends an
-    // LLM call, so the committee's last verdict is on screen immediately. A 404
-    // simply means this client has not been through the committee yet.
-    fetch(`${API_BASE}/customers/${customerId}/audit`, { signal: controller.signal })
-      .then(res => {
-        if (res.status === 404) return null;
-        if (!res.ok) throw new Error(`GET /customers/${customerId}/audit -> ${res.status}`);
-        return res.json();
-      })
-      .then(data => {
-        if (data) {
-          setAudit(data);
-          setAuditSource('saved');
-        }
-        setLoadingSaved(false);
-      })
-      .catch(err => {
-        if (err.name !== 'AbortError') {
-          console.error("Failed to load saved audit:", err);
-          setLoadingSaved(false);
-        }
-      });
-
-    // Switching clients fast must not let a slow earlier response overwrite a newer one.
-    return () => controller.abort();
-  }, [customerId]);
-
-  const runAudit = () => {
-    setLoading(true);
-    fetch(`${API_BASE}/customers/${customerId}/audit`, { method: 'POST' })
-      .then(res => res.json())
-      .then(data => {
-        setAudit(data);
-        setAuditSource('fresh');
-        setLoading(false);
-        // An audit writes decision_status, so the aggregate views are now stale.
-        onAuditComplete?.();
-      })
-      .catch(err => {
-        console.error("Audit error:", err);
-        setLoading(false);
-      });
-  };
+  const { profile } = useCustomerProfile(customerId);
+  const { audit, auditSource, loadingSaved, loading, taskStatus, auditError, justCompleted, runAudit } =
+    useCommitteeAudit(customerId, onAuditComplete);
 
   const lastAnalyzed = formatDate(audit?.last_analyzed_at);
   const auditAgeDays = daysSince(audit?.last_analyzed_at);
@@ -185,11 +123,27 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
               style={audit ? drawerStyles.rerunBtn : drawerStyles.auditBtn}
             >
               {loading
-                ? "Running Multi-Agent Audit..."
-                : audit
-                  ? "Re-run Multi-Agent Audit"
-                  : "Run Executive AI Audit"}
+                ? taskStatus === 'PROCESSING'
+                  ? "Running Multi-Agent Audit..."
+                  : "Queued..."
+                : auditError
+                  ? "Try again"
+                  : audit
+                    ? "Re-run Multi-Agent Audit"
+                    : "Run Executive AI Audit"}
             </button>
+
+            {justCompleted && !auditError && (
+              <div style={{ ...drawerStyles.banner, borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+                Audit complete: {justCompleted}
+              </div>
+            )}
+
+            {auditError && (
+              <div style={{ ...drawerStyles.banner, borderColor: 'var(--status-rejected)' }}>
+                <strong>Audit error.</strong> {auditError}
+              </div>
+            )}
 
             {hasDrift && (
               <div style={{ ...drawerStyles.banner, borderColor: 'var(--status-review)' }}>

@@ -10,6 +10,7 @@ from src.domain.entities import (
     AuditResult,
     RiskEvaluationResult,
     assess_behavioral_floor,
+    credit_bracket_floor,
     derive_behavioral_floor,
     explain_behavioral_verdict,
     parse_behavioral_assessment,
@@ -108,6 +109,37 @@ class TestPolicyOutranksModel:
     def test_approval_of_low_risk_is_left_alone(self):
         result = parse_cro("DECISION: APPROVED\nRISK TIER: LOW", quant_standing="LOW RISK")
         assert result.decision == "APPROVED"
+
+    def test_rejection_of_low_risk_is_escalated(self):
+        """A REJECTED verdict with no hard breach behind it is a hallucinated
+        Policy 1 citation, not a real one - it must go to a human, not stand."""
+        result = parse_cro("DECISION: REJECTED\nRISK TIER: LOW", quant_standing="LOW RISK")
+        assert result.decision == "MANUAL REVIEW REQUIRED"
+        assert result.policy_escalated is True
+
+    def test_rejection_of_moderate_risk_is_escalated(self):
+        result = parse_cro("DECISION: REJECTED\nRISK TIER: MEDIUM", quant_standing="MODERATE RISK")
+        assert result.decision == "MANUAL REVIEW REQUIRED"
+
+    def test_rejection_escalation_is_explained_distinctly(self):
+        """explain() must not narrate an approval-of-critical story for the
+        opposite direction - it previously always did, regardless of cause."""
+        result = parse_cro("DECISION: REJECTED\nRISK TIER: LOW", quant_standing="LOW RISK")
+        basis = result.explain()
+        assert "rejected a profile with no hard policy breach" in basis
+        assert "approved a CRITICAL RISK profile" not in basis
+
+    def test_rejection_of_low_risk_keeps_the_reported_tier(self):
+        """Unlike the approval-escalation case, the tier here is not the
+        contradicted claim, so it is trusted rather than floored."""
+        result = parse_cro("DECISION: REJECTED\nRISK TIER: LOW", quant_standing="LOW RISK")
+        assert result.risk_tier == "LOW"
+
+    def test_rejection_without_quant_standing_is_left_alone(self):
+        """No quant_standing means no known-good signal to contradict - the
+        REJECTED report is trusted, same as before this guard existed."""
+        result = parse_cro("DECISION: REJECTED\nRISK TIER: HIGH")
+        assert result.decision == "REJECTED"
 
 
 class TestBehavioralAssessmentParsing:
@@ -293,3 +325,99 @@ class TestVerdictBasis:
         result = RiskEvaluationResult.from_cro_report(report, quant_standing="LOW RISK")
         assert result.policy_escalated is False
         assert "policy escalated" not in result.explain()
+
+
+class TestCreditBracketFloor:
+    """The 620-669 FAIR band previously matched no tier at all."""
+
+    @pytest.mark.parametrize(
+        ("credit_score", "expected"),
+        [
+            (619, "HIGH"),
+            (620, "MEDIUM"),
+            (669, "MEDIUM"),
+            (670, "LOW"),
+            (800, "LOW"),
+        ],
+    )
+    def test_bracket_boundaries(self, credit_score, expected):
+        assert credit_bracket_floor(credit_score)[0] == expected
+
+    def test_missing_score_contributes_nothing(self):
+        assert credit_bracket_floor(None)[0] == "LOW"
+
+    def test_fair_bracket_floors_an_otherwise_clean_file_to_medium(self):
+        tier, reason = assess_behavioral_floor(
+            delinquencies=0, employment_length_years=6, credit_score=650
+        )
+        assert tier == "MEDIUM"
+        assert "FAIR bracket" in reason
+
+    def test_poor_bracket_outranks_a_clean_record(self):
+        tier, _ = assess_behavioral_floor(
+            delinquencies=0, employment_length_years=6, credit_score=580
+        )
+        assert tier == "HIGH"
+
+    def test_delinquency_floor_survives_a_tie_with_its_own_reason(self):
+        # Both halves say MEDIUM; the more specific record reason must be kept.
+        tier, reason = assess_behavioral_floor(
+            delinquencies=1, employment_length_years=6, credit_score=650
+        )
+        assert tier == "MEDIUM"
+        assert "1 delinquency" in reason
+
+
+class TestNoteFlagFloor:
+    """A note-derived red flag can never read as a verified-clean file."""
+
+    def test_note_flags_floor_a_clean_record_to_medium(self):
+        tier, reason = assess_behavioral_floor(
+            delinquencies=0,
+            employment_length_years=6,
+            credit_score=720,
+            note_flags=["high credit utilisation"],
+        )
+        assert tier == "MEDIUM"
+        assert "high credit utilisation" in reason
+
+    def test_no_note_flags_leaves_a_clean_record_low(self):
+        tier, _ = assess_behavioral_floor(
+            delinquencies=0, employment_length_years=6, credit_score=720, note_flags=[]
+        )
+        assert tier == "LOW"
+
+    def test_note_flags_do_not_lower_a_severe_record(self):
+        tier, _ = assess_behavioral_floor(
+            delinquencies=3,
+            employment_length_years=6,
+            credit_score=720,
+            note_flags=["high credit utilisation"],
+        )
+        assert tier == "HIGH"
+
+
+class TestCroTierAlias:
+    """The CRO agent reports 'CRITICAL', which is not in the domain tier enum."""
+
+    def test_critical_maps_to_high(self):
+        result = RiskEvaluationResult.from_cro_report(
+            "DECISION: REJECTED\nRISK TIER: CRITICAL\nEXECUTIVE RATIONALE: policy 1"
+        )
+        assert result.risk_tier == "HIGH"
+
+    def test_critical_risk_with_markdown_maps_to_high(self):
+        result = RiskEvaluationResult.from_cro_report(
+            "**DECISION:** REJECTED\n**RISK TIER:** CRITICAL RISK"
+        )
+        assert result.risk_tier == "HIGH"
+
+    def test_canonical_tiers_are_unchanged(self):
+        result = RiskEvaluationResult.from_cro_report(
+            "DECISION: APPROVED\nRISK TIER: EXTREME"
+        )
+        assert result.risk_tier == "EXTREME"
+
+    def test_unreadable_tier_still_fails_closed(self):
+        result = RiskEvaluationResult.from_cro_report("DECISION: REJECTED\nRISK TIER: BANANA")
+        assert result.risk_tier == RiskEvaluationResult.FALLBACK_TIER

@@ -1,4 +1,3 @@
-
 from pydantic import BaseModel, ConfigDict
 
 
@@ -25,8 +24,8 @@ class CustomerProfileResponse(BaseModel):
     delinquencies_2yrs: int
     employment_length_years: int | None = None
     live_xgb_risk_score: float
-    cpf: str | None = None       # Sanitized / Masked PII
-    email: str | None = None     # Sanitized / Masked PII
+    cpf: str | None = None  # Sanitized / Masked PII
+    email: str | None = None  # Sanitized / Masked PII
     sanitized_notes: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -47,6 +46,15 @@ class AuditResultResponse(BaseModel):
     decision: str = "MANUAL REVIEW REQUIRED"
     risk_tier: str = "HIGH"
     qual_assessment: str = "MEDIUM"
+    # Same shape as SavedAuditResponse's verdict/basis fields below, so a freshly
+    # completed run and a replayed one render identically - a UI that reads one
+    # must not silently go blank reading the other.
+    quant_verdict: str | None = None
+    qual_verdict: str | None = None
+    cro_verdict: str | None = None
+    quant_basis: str | None = None
+    qual_basis: str | None = None
+    cro_basis: str | None = None
 
 
 # ------------------------------------------------------------------
@@ -98,3 +106,34 @@ class SavedAuditResponse(BaseModel):
     qual_basis: str | None = None
     cro_basis: str | None = None
     execution_time_ms: int = 0
+
+
+# ------------------------------------------------------------------
+# Async Audit Task DTOs
+# ------------------------------------------------------------------
+class AuditTaskStartedResponse(BaseModel):
+    task_id: str
+    status: str = "PENDING"
+
+
+class AuditTaskStatusResponse(BaseModel):
+    task_id: str
+    status: str
+    result: AuditResultResponse | None = None
+    error: str | None = None
+
+
+# ------------------------------------------------------------------
+# Historical Credit Score Point DTO
+# ------------------------------------------------------------------
+class ScoreHistoryPoint(BaseModel):
+    date: str
+    score: int
+
+
+# ------------------------------------------------------------------
+# Historical Risk (XGBoost default probability) Point DTO
+# ------------------------------------------------------------------
+class RiskScoreHistoryPoint(BaseModel):
+    date: str
+    score: float

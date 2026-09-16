@@ -161,6 +161,42 @@ def seed_sample_agent_analytics():
             """)
 
 
+def reset_audit_runs(reseed: bool = True) -> dict:
+    """Clears every stored audit run so the pipeline can be exercised from a clean slate.
+
+    Drops all agent verdicts and the loan applications they hang off, including any
+    human overrides, then restarts both identity sequences so a fresh run numbers
+    from 1. Customers, their trained risk scores, and the saved model are left
+    alone - this resets what the committee produced, not what it reads.
+
+    ``seed_sample_agent_analytics`` re-seeds fixture rows whenever the evaluations
+    table is empty, and it runs on every API startup. Leaving the table empty
+    therefore does not stay empty; ``reseed`` defaults to True so the result is
+    exactly first-boot state rather than a state the next ``uvicorn`` start would
+    silently change underneath a test.
+    """
+    with get_write_connection() as conn:
+        evaluations = conn.execute("SELECT COUNT(*) FROM agent_evaluations").fetchone()[0]
+        applications = conn.execute("SELECT COUNT(*) FROM loan_applications").fetchone()[0]
+
+        conn.execute("DELETE FROM agent_evaluations")
+        conn.execute("DELETE FROM loan_applications")
+
+        # Without this the next audit's application_id continues from the old high
+        # water mark, so a "clean" run reads as if history had been truncated.
+        conn.execute("CREATE OR REPLACE SEQUENCE seq_applications START 1")
+        conn.execute("CREATE OR REPLACE SEQUENCE seq_evaluations START 1")
+
+    if reseed:
+        seed_sample_agent_analytics()
+
+    return {
+        "evaluations_deleted": int(evaluations),
+        "applications_deleted": int(applications),
+        "reseeded": reseed,
+    }
+
+
 def fetch_executive_kpis() -> dict:
     """Executes aggregate queries over existing customer records and loan applications."""
     with get_read_connection() as conn:
@@ -279,15 +315,29 @@ def fetch_agent_divergence() -> list:
         return df.to_dict(orient="records")
 
 
+# The one definition of "the agents disagreed" on an application: three votes
+# that didn't land on the same normalized verdict (REJECT/ALERT/APPROVE, see
+# QUANT_STANDING_TO_VERDICT and friends below). The consensus donut and the
+# HITL queue both start from this exact CTE so neither can drift into a
+# different notion of "disagreed" than the other - the donut counts every
+# application this is true for; the queue narrows it to the ones still open
+# (AND overridden_at IS NULL), a filter on top of the same fact, not a
+# different fact.
+AGENT_SPLIT_CTE = """
+    WITH per_application AS (
+        SELECT application_id, COUNT(DISTINCT decision) AS distinct_decisions
+        FROM agent_evaluations
+        GROUP BY application_id
+    )
+"""
+
+
 def fetch_agent_consensus_stats() -> dict:
     """Aggregates unanimous vs divergent applications to size the HITL workload."""
     with get_read_connection() as conn:
-        query = """
-            WITH per_application AS (
-                SELECT application_id, COUNT(DISTINCT decision) AS distinct_decisions
-                FROM agent_evaluations
-                GROUP BY application_id
-            )
+        query = (
+            AGENT_SPLIT_CTE
+            + """
             SELECT
                 COUNT(*) AS evaluated_applications,
                 COALESCE(SUM(CASE WHEN p.distinct_decisions = 1 THEN 1 ELSE 0 END), 0) AS unanimous,
@@ -297,7 +347,8 @@ def fetch_agent_consensus_stats() -> dict:
                 ), 0) AS pending_review
             FROM per_application p
             LEFT JOIN loan_applications a ON a.application_id = p.application_id;
-        """
+            """
+        )
         res = conn.execute(query).fetchone()
 
         evaluated = res[0] or 0
@@ -321,12 +372,9 @@ def fetch_agent_consensus_stats() -> dict:
 def fetch_hitl_exception_queue() -> list:
     """Lists applications whose agents disagreed, with each agent's vote attached."""
     with get_read_connection() as conn:
-        queue_query = """
-            WITH per_application AS (
-                SELECT application_id, COUNT(DISTINCT decision) AS distinct_decisions
-                FROM agent_evaluations
-                GROUP BY application_id
-            )
+        queue_query = (
+            AGENT_SPLIT_CTE
+            + """
             SELECT
                 a.application_id,
                 a.customer_id,
@@ -341,7 +389,8 @@ def fetch_hitl_exception_queue() -> list:
             WHERE p.distinct_decisions > 1
               AND a.overridden_at IS NULL
             ORDER BY a.created_at DESC;
-        """
+            """
+        )
         applications = conn.execute(queue_query).df().to_dict(orient="records")
         if not applications:
             return []
@@ -562,7 +611,7 @@ def backfill_qualitative_basis() -> int:
     with get_write_connection() as conn:
         pending = conn.execute(
             """
-            SELECT e.evaluation_id, e.rationale, c.delinquencies_2yrs, c.employment_length_years
+            SELECT e.evaluation_id, e.rationale, c.delinquencies_2yrs, c.employment_length_years, c.credit_score
             FROM agent_evaluations e
             JOIN loan_applications a ON a.application_id = e.application_id
             JOIN customers c ON c.customer_id = a.customer_id
@@ -571,9 +620,11 @@ def backfill_qualitative_basis() -> int:
         ).fetchall()
 
         filled = 0
-        for evaluation_id, rationale, delinquencies, employment_years in pending:
+        for evaluation_id, rationale, delinquencies, employment_years, credit_score in pending:
             model_assessment = parse_behavioral_assessment(rationale or "")
-            floor, floor_reason = assess_behavioral_floor(delinquencies, employment_years)
+            floor, floor_reason = assess_behavioral_floor(
+                delinquencies, employment_years, credit_score
+            )
             final = reconcile_behavioral_assessment(model_assessment, floor)
             basis = explain_behavioral_verdict(model_assessment, floor, floor_reason, final)
             conn.execute(
@@ -583,6 +634,56 @@ def backfill_qualitative_basis() -> int:
             filled += 1
 
         return filled
+
+
+def backfill_quantitative_basis(rewrite_existing: bool = True) -> int:
+    """Rewrites the quantitative verdict_basis on runs stored before it named the breach.
+
+    Unlike the qualitative backfill, nothing here is reconstructed from prose: the
+    contemporaneous XGBoost score is on the evaluation row (persisted as a
+    percentage) and both hard thresholds come off the customer record, so the line
+    is recomputed from the same inputs the audit used.
+
+    Earlier rows named only the XGBoost score, which reads as the cause even when
+    that score cleared its threshold and a sub-620 credit score or an over-40% DTI
+    was the actual breach. Those lines are wrong rather than missing, so by default
+    this rewrites them; pass rewrite_existing=False to fill only NULLs.
+
+    Returns the number of rows written.
+    """
+    from src.domain.policy import explain_quantitative_standing
+
+    predicate = "" if rewrite_existing else " AND e.verdict_basis IS NULL"
+    with get_write_connection() as conn:
+        pending = conn.execute(
+            f"""
+            SELECT e.evaluation_id, e.agent_score, c.credit_score, c.debt_to_income_ratio
+            FROM agent_evaluations e
+            JOIN loan_applications a ON a.application_id = e.application_id
+            JOIN customers c ON c.customer_id = a.customer_id
+            WHERE e.agent_name = 'Quantitative Agent'{predicate}
+            """
+        ).fetchall()
+
+        written = 0
+        for evaluation_id, agent_score, credit_score, dti in pending:
+            # A row missing either hard-threshold input cannot be recomputed, and a
+            # guessed default would reintroduce the misattribution this fixes.
+            if credit_score is None or dti is None:
+                continue
+            basis = explain_quantitative_standing(
+                credit_score=int(credit_score),
+                dti=float(dti),
+                # agent_score is the XGBoost probability stored as a percentage.
+                xgb_score=float(agent_score or 0.0) / 100.0,
+            )
+            conn.execute(
+                "UPDATE agent_evaluations SET verdict_basis = ? WHERE evaluation_id = ?",
+                [f"{basis} (recomputed from the stored record)", evaluation_id],
+            )
+            written += 1
+
+        return written
 
 
 def record_human_override(
@@ -676,6 +777,95 @@ def fetch_risk_profile_distribution() -> dict:
             "rating_bands": rating_bands,
             "dti_relationship": dti_relationship,
             "delinquency_matrix": delinquency_matrix,
+        }
+
+
+# Standard FICO tiers, upper bound exclusive. Distinct from RISK_BANDS above:
+# these bucket the credit_score input, not the risk_score the model produces.
+CREDIT_SCORE_BANDS = [
+    ("Poor", 300, 580),
+    ("Fair", 580, 670),
+    ("Good", 670, 740),
+    ("Very Good", 740, 800),
+    ("Exceptional", 800, 851),
+]
+
+
+def fetch_credit_score_bands() -> list:
+    """Average XGBoost default probability grouped by FICO credit-score tier."""
+    with get_read_connection() as conn:
+        band_case = " ".join(
+            f"WHEN credit_score >= {low} AND credit_score < {high} THEN '{label}'"
+            for label, low, high in CREDIT_SCORE_BANDS
+        )
+        query = f"""
+            SELECT
+                CASE {band_case} END AS band,
+                COUNT(*) AS customer_count,
+                ROUND(AVG(risk_score), 4) AS avg_default_probability
+            FROM customers
+            WHERE risk_score IS NOT NULL
+            GROUP BY band;
+        """
+        rows = {row["band"]: row for row in conn.execute(query).df().to_dict(orient="records")}
+
+        # Emit every band even when empty so the chart keeps a stable axis.
+        return [
+            {
+                "band": label,
+                "range_label": f"{low}-{high - 1}",
+                "customer_count": int(rows.get(label, {}).get("customer_count", 0)),
+                "avg_default_probability": float(
+                    rows.get(label, {}).get("avg_default_probability") or 0.0
+                ),
+            }
+            for label, low, high in CREDIT_SCORE_BANDS
+        ]
+
+
+def fetch_portfolio_highlights(limit: int = 5) -> dict:
+    """Top-N clients by default probability and by requested loan size, plus the
+    portfolio-wide averages the customer view compares one applicant against.
+    """
+    with get_read_connection() as conn:
+        top_risk_query = """
+            SELECT customer_id, full_name, CAST(risk_score AS DOUBLE) AS risk_score,
+                   CAST(loan_amount_requested AS DOUBLE) AS loan_amount_requested
+            FROM customers
+            WHERE risk_score IS NOT NULL
+            ORDER BY risk_score DESC, customer_id
+            LIMIT ?;
+        """
+        top_risk = conn.execute(top_risk_query, [limit]).df().to_dict(orient="records")
+
+        top_loans_query = """
+            SELECT customer_id, full_name, CAST(loan_amount_requested AS DOUBLE) AS loan_amount_requested,
+                   CAST(risk_score AS DOUBLE) AS risk_score
+            FROM customers
+            WHERE loan_amount_requested IS NOT NULL
+            ORDER BY loan_amount_requested DESC, customer_id
+            LIMIT ?;
+        """
+        top_loans = conn.execute(top_loans_query, [limit]).df().to_dict(orient="records")
+
+        averages_query = """
+            SELECT
+                ROUND(AVG(credit_score), 1) AS avg_credit_score,
+                ROUND(AVG(debt_to_income_ratio), 4) AS avg_debt_to_income_ratio,
+                ROUND(AVG(risk_score), 4) AS avg_default_probability
+            FROM customers
+            WHERE risk_score IS NOT NULL;
+        """
+        averages = conn.execute(averages_query).fetchone()
+
+        return {
+            "top_default_risk": top_risk,
+            "top_loan_amounts": top_loans,
+            "portfolio_averages": {
+                "avg_credit_score": float(averages[0] or 0.0),
+                "avg_debt_to_income_ratio": float(averages[1] or 0.0),
+                "avg_default_probability": float(averages[2] or 0.0),
+            },
         }
 
 

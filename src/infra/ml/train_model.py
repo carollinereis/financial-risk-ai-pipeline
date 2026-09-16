@@ -1,8 +1,10 @@
 from datetime import datetime
 
 from src.infra.database.database import bulk_update_risk_scores, get_db_connection, init_db
-from src.infra.ml.credit_risk_model import HIGH_RISK_THRESHOLD, MODEL_VERSION, CreditRiskModel
+from src.infra.ml.credit_risk_model import MODEL_VERSION, CreditRiskModel
 
+# OPERATIONAL RISK THRESHOLD FOR DATABASE FLAG
+OPERATIONAL_THRESHOLD = 0.05
 
 def run_training_pipeline():
     init_db()
@@ -26,7 +28,7 @@ def run_training_pipeline():
 
     # 4. Score all customers & build persistence metadata
     df["risk_score"] = model_pipeline.predict_proba(X)
-    df["is_high_risk_predicted"] = df["risk_score"] >= HIGH_RISK_THRESHOLD
+    df["is_high_risk_predicted"] = df["risk_score"] >= OPERATIONAL_THRESHOLD
     df["model_version"] = MODEL_VERSION
     df["scored_at"] = datetime.now()
 
