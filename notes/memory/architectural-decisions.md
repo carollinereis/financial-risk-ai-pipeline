@@ -1,1 +1,0 @@
-Do not touch backend structure. Only connect API's, DuckDB or Postgres
