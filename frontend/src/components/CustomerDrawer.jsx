@@ -9,13 +9,6 @@ const DECISION_COLORS = {
   'MANUAL REVIEW REQUIRED': 'var(--status-review)',
 };
 
-// The committee's own prose repeats its policy list verbatim for every applicant.
-// Only the rationale is applicant-specific, so that is what the summary shows.
-const extractRationale = (text) => {
-  const match = (text || '').match(/EXECUTIVE RATIONALE\s*:?\s*\**\s*([\s\S]+)/i);
-  return (match ? match[1] : text || '').trim();
-};
-
 const formatDate = (value) => {
   if (!value) return null;
   const parsed = new Date(value.replace(' ', 'T'));
@@ -197,7 +190,10 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
                   )}
                 </div>
 
-                <AgentReport text={extractRationale(audit.cro_decision || audit.cro_report)} />
+                {/* The committee's own prose repeats its policy list verbatim for every
+                    applicant. Only the rationale is applicant-specific, so that is what
+                    the summary shows - extracted server-side, in entities.extract_rationale. */}
+                <AgentReport text={audit.rationale} />
 
                 {/* Full transcripts stay available for the audit trail, collapsed so
                     the drawer opens on the part an underwriter actually skims. */}

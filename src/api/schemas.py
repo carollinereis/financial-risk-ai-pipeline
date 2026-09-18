@@ -45,6 +45,10 @@ class AuditResultResponse(BaseModel):
     cro_decision: str
     quant_analysis: str
     qual_analysis: str
+    # The EXECUTIVE RATIONALE portion of cro_decision, extracted server-side so
+    # every consumer (dashboard, drawer, any future client) reads the same text
+    # instead of each re-implementing the same regex against the raw report.
+    rationale: str = ""
     # Structured verdict parsed from the CRO prose; additive, so existing
     # consumers of the free-text fields keep working unchanged.
     decision: str = "MANUAL REVIEW REQUIRED"
@@ -104,6 +108,9 @@ class SavedAuditResponse(BaseModel):
     quant_analysis: str = ""
     qual_analysis: str = ""
     cro_decision: str = ""
+    # Same rationale extraction as AuditResultResponse, so a replayed report and
+    # a freshly completed one render identically.
+    rationale: str = ""
     # One line per agent explaining how the verdict was reached, including any
     # deterministic policy override that contradicts the agent's own prose.
     quant_basis: str | None = None

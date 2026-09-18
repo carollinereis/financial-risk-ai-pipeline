@@ -76,6 +76,16 @@ def extract_labelled_value(label: str, text: str, allowed: tuple[str, ...]) -> s
     return None
 
 
+def extract_rationale(text: str) -> str:
+    """Pulls the EXECUTIVE RATIONALE prose out of the CRO report, tolerating the
+    markdown the LLM wraps the label in. Falls back to the full text when the
+    label isn't found, so a malformed report still shows something rather than
+    nothing.
+    """
+    match = re.search(r"EXECUTIVE RATIONALE\s*:?\s*\**\s*([\s\S]+)", text or "", re.IGNORECASE)
+    return (match.group(1) if match else (text or "")).strip()
+
+
 def _years(count: int) -> str:
     return f"{count} year" if count == 1 else f"{count} years"
 

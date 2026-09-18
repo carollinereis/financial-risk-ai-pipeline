@@ -18,6 +18,7 @@ from src.api.schemas import (
     ScoreHistoryPoint,
 )
 from src.application.run_audit_task import run_audit_task
+from src.domain.entities import extract_rationale
 from src.domain.policy import policy_reference
 from src.infra.agents.agent_tools import (
     get_customer_financial_profile,
@@ -82,6 +83,13 @@ class HumanOverrideRequest(BaseModel):
     underwriter: str
 
 
+def _fetch_or_500(fn, label: str):
+    try:
+        return fn()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching {label}: {str(e)}") from e
+
+
 @app.get("/customers", response_model=list[CustomerListItem])
 def list_customers():
     """Fetch available customer list for dropdown selection."""
@@ -139,6 +147,7 @@ def get_saved_audit(customer_id: int):
             status_code=404,
             detail=f"No saved audit recorded for customer ID {customer_id}.",
         )
+    saved["rationale"] = extract_rationale(saved.get("cro_decision", ""))
     return SavedAuditResponse(**saved)
 
 
@@ -218,107 +227,61 @@ def get_risk_score_history(customer_id: int):
 @app.get("/api/dashboard/kpis")
 def get_dashboard_kpis():
     """Fetch high-level executive KPIs for the top card grid."""
-    try:
-        return fetch_executive_kpis()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching executive KPIs: {str(e)}"
-        ) from e
+    return _fetch_or_500(fetch_executive_kpis, "executive KPIs")
 
 
 @app.get("/api/dashboard/customer-registry", response_model=list[CustomerRegistryItem])
 def get_customer_registry():
     """Fetch every customer with the standing verdict and date of their last audit."""
-    try:
-        return fetch_customer_registry()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching customer registry: {str(e)}"
-        ) from e
+    return _fetch_or_500(fetch_customer_registry, "customer registry")
 
 
 @app.get("/api/dashboard/agent-analytics")
 def get_agent_analytics():
     """Fetch AI agent consensus/divergence distributions for Recharts."""
-    try:
-        return fetch_agent_divergence()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching agent analytics: {str(e)}"
-        ) from e
+    return _fetch_or_500(fetch_agent_divergence, "agent analytics")
 
 
 @app.get("/api/dashboard/agent-consensus")
 def get_agent_consensus():
     """Fetch unanimous vs divergent split driving the HITL exception workload."""
-    try:
-        return fetch_agent_consensus_stats()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching agent consensus: {str(e)}"
-        ) from e
+    return _fetch_or_500(fetch_agent_consensus_stats, "agent consensus")
 
 
 @app.get("/api/dashboard/policy-reference")
 def get_policy_reference():
     """Serves the enforced underwriting thresholds and the committee's policy list."""
-    try:
-        return policy_reference()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching policy reference: {str(e)}"
-        ) from e
+    return _fetch_or_500(policy_reference, "policy reference")
 
 
 @app.get("/api/dashboard/decision-distribution")
 def get_decision_distribution():
     """Fetch the portfolio outcome split (approved/rejected/manual review) for the donut."""
-    try:
-        return fetch_decision_distribution()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching decision distribution: {str(e)}"
-        ) from e
+    return _fetch_or_500(fetch_decision_distribution, "decision distribution")
 
 
 @app.get("/api/dashboard/hitl-queue")
 def get_hitl_queue():
     """Fetch applications where the agent committee disagreed, pending human review."""
-    try:
-        return fetch_hitl_exception_queue()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching HITL queue: {str(e)}") from e
+    return _fetch_or_500(fetch_hitl_exception_queue, "HITL queue")
 
 
 @app.get("/api/dashboard/risk-profile")
 def get_risk_profile():
     """Fetch portfolio rating bands, DTI-vs-default scatter, and delinquency matrix."""
-    try:
-        return fetch_risk_profile_distribution()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching risk profile: {str(e)}") from e
+    return _fetch_or_500(fetch_risk_profile_distribution, "risk profile")
 
 
 @app.get("/api/dashboard/credit-score-bands")
 def get_credit_score_bands():
     """Fetch average default probability grouped by FICO credit-score tier."""
-    try:
-        return fetch_credit_score_bands()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching credit score bands: {str(e)}"
-        ) from e
+    return _fetch_or_500(fetch_credit_score_bands, "credit score bands")
 
 
 @app.get("/api/dashboard/portfolio-highlights")
 def get_portfolio_highlights(limit: int = 5):
     """Fetch the top-N default-risk and largest-loan clients, plus portfolio averages."""
-    try:
-        return fetch_portfolio_highlights(limit=limit)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching portfolio highlights: {str(e)}"
-        ) from e
+    return _fetch_or_500(lambda: fetch_portfolio_highlights(limit=limit), "portfolio highlights")
 
 
 @app.patch("/api/dashboard/override/{application_id}")

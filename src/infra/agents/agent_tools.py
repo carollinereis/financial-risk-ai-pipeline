@@ -29,7 +29,7 @@ def _predict_live_risk(record: dict[str, Any]) -> float:
     )
     proba = _MODEL.predict_proba(features)
 
-    # 2. Extract scalar value safely depending on return shape
+    # proba can come back as a numpy scalar, 0-D/1-D array, or plain float
     if hasattr(proba, "item"):
         proba_val = proba.item()  # Works for numpy scalars/0D/1D single-element arrays
     elif isinstance(proba, (list, tuple)):
@@ -65,13 +65,10 @@ def get_customer_financial_profile(customer_id: int) -> dict[str, Any]:
     try:
         record["live_xgb_risk_score"] = float(_predict_live_risk(record))
     except Exception as e:
-        # Fallback to static stored score if live inference fails
-        fallback_score = record.get("risk_score", 0.0)
-        try:
-            record["live_xgb_risk_score"] = float(fallback_score)
-        except (TypeError, ValueError):
-            record["live_xgb_risk_score"] = 0.0
-        # Optional: keep the error message separately instead of overwriting the score
+        fallback_score = record.get("risk_score")
+        record["live_xgb_risk_score"] = (
+            float(fallback_score) if isinstance(fallback_score, (int, float)) else 0.0
+        )
         record["live_xgb_risk_score_error"] = str(e)
 
     return record
