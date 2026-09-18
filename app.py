@@ -68,9 +68,8 @@ with col2:
 with col3:
     st.metric("Annual Income", f"${profile.get('annual_income', 0):,.2f}")
 with col4:
-    xgb_score = float(profile.get("live_xgb_risk_score", 0.0))
     try:
-        xgb_score = float(xgb_score) if xgb_score is not None else 0.0
+        xgb_score = float(profile.get("live_xgb_risk_score") or 0.0)
     except (TypeError, ValueError):
         xgb_score = 0.0
     st.metric(
@@ -105,7 +104,7 @@ if st.button("Run AI Underwriting Audit Committee", type="primary", use_containe
             xgb_score=xgb_score
         )
 
-        # 3. Call Orchestrator Function (returns a dict with keys: 'quant_report', 'qual_report', 'cro_report')
+        # 3. Call Orchestrator Function (returns quant_analysis/qual_analysis/cro_decision)
         audit_results = run_audit_committee(
             profile=customer_entity,
             sanitized_notes=notes,
