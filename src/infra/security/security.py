@@ -8,10 +8,8 @@ def sanitize_input(text: str) -> str:
     if not isinstance(text, str):
         return ""
 
-    # 1. Remove HTML tags, brackets, and backslashes (your original cleanup)
     cleaned = re.sub(r"[<>{}\\]", "", text)
 
-    # 2. Strip known prompt injection command patterns
     injection_patterns = [
         r"(?i)ignore\s+(?:all\s+|previous\s+|prior\s+|the\s+|above\s+)*instructions.*",
         r"(?i)system\s+prompt.*",
@@ -84,7 +82,6 @@ def get_sanitized_customer_data(customer_id: int) -> dict:
     if not result:
         return {}
 
-    # Map query tuple to dictionary
     data = {
         "customer_id": result[0],
         "full_name": result[1],
