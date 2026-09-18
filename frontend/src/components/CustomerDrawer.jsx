@@ -9,13 +9,6 @@ const DECISION_COLORS = {
   'MANUAL REVIEW REQUIRED': 'var(--status-review)',
 };
 
-// The committee's own prose repeats its policy list verbatim for every applicant.
-// Only the rationale is applicant-specific, so that is what the summary shows.
-const extractRationale = (text) => {
-  const match = (text || '').match(/EXECUTIVE RATIONALE\s*:?\s*\**\s*([\s\S]+)/i);
-  return (match ? match[1] : text || '').trim();
-};
-
 const formatDate = (value) => {
   if (!value) return null;
   const parsed = new Date(value.replace(' ', 'T'));
@@ -71,7 +64,9 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
             <h3 style={{ color: 'var(--accent)', marginBottom: '10px' }}>Personal & Financial Demographics</h3>
             <div style={drawerStyles.grid}>
               <div><span style={drawerStyles.label}>Full Name:</span> <strong>{profile.full_name}</strong></div>
-              <div><span style={drawerStyles.label}>CPF (Masked):</span> <strong>{profile.cpf}</strong></div>
+              <div><span style={drawerStyles.label}>CPF (Masked):</span> <strong>{profile.cpf_masked}</strong></div>
+              <div><span style={drawerStyles.label}>Email (Masked):</span> <strong>{profile.email_masked}</strong></div>
+              <div><span style={drawerStyles.label}>Phone (Masked):</span> <strong>{profile.phone_masked}</strong></div>
               <div><span style={drawerStyles.label}>Credit Score:</span> <strong>{profile.credit_score}</strong></div>
               <div><span style={drawerStyles.label}>DTI Ratio:</span> <strong>{(profile.debt_to_income_ratio * 100).toFixed(1)}%</strong></div>
               <div><span style={drawerStyles.label}>Annual Income:</span> <strong>${profile.annual_income?.toLocaleString()}</strong></div>
@@ -195,7 +190,10 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
                   )}
                 </div>
 
-                <AgentReport text={extractRationale(audit.cro_decision || audit.cro_report)} />
+                {/* The committee's own prose repeats its policy list verbatim for every
+                    applicant. Only the rationale is applicant-specific, so that is what
+                    the summary shows - extracted server-side, in entities.extract_rationale. */}
+                <AgentReport text={audit.rationale} />
 
                 {/* Full transcripts stay available for the audit trail, collapsed so
                     the drawer opens on the part an underwriter actually skims. */}

@@ -81,18 +81,8 @@ class UnderwritingPolicy:
 
 
 def explain_quantitative_standing(credit_score: int, dti: float, xgb_score: float) -> str:
-    """Names the thresholds that produced the standing, breached and cleared alike.
-
-    CRITICAL RISK is a three-way OR, so a stored basis naming only one input reads
-    as if that input caused the verdict. A profile can be CRITICAL on a sub-620
-    credit score while its XGBoost score sits at 4%; reporting the score alone
-    misattributes the rejection to the one metric that passed.
-
-    Every breach is listed, not just the first, and on a CRITICAL verdict the
-    metrics that cleared are named as cleared. Stating the passing metric is what
-    forecloses the misreading: a reader who sees the score reported as within
-    threshold cannot infer it drove the outcome.
-    """
+    """Names every threshold, breached or cleared, so a CRITICAL verdict isn't
+    misattributed to whichever single metric got listed."""
     policy = UnderwritingPolicy
     credit_breached = credit_score < policy.MIN_CREDIT_SCORE
     dti_breached = dti > policy.MAX_DTI
@@ -116,28 +106,15 @@ def explain_quantitative_standing(credit_score: int, dti: float, xgb_score: floa
             f"{policy.XGB_HIGH_RISK_THRESHOLD:.0%} threshold"
         )
     )
+    clauses = (
+        (credit_breached, credit_clause),
+        (dti_breached, dti_clause),
+        (xgb_breached, xgb_clause),
+    )
 
     if credit_breached or dti_breached or xgb_breached:
-        breaches = [
-            clause
-            for clause, breached in (
-                (credit_clause, credit_breached),
-                (dti_clause, dti_breached),
-                (xgb_clause, xgb_breached),
-            )
-            if breached
-        ]
-        cleared = [
-            clause
-            for clause, breached in (
-                (credit_clause, credit_breached),
-                (dti_clause, dti_breached),
-                (xgb_clause, xgb_breached),
-            )
-            if not breached
-        ]
-        # The arrow follows the breach directly. Trailing the cleared metrics after
-        # the verdict keeps them as context rather than as apparent causes.
+        breaches = [clause for breached, clause in clauses if breached]
+        cleared = [clause for breached, clause in clauses if not breached]
         detail = "Breach: " + "; ".join(breaches) + " -> CRITICAL RISK."
         if cleared:
             detail += " Cleared: " + "; ".join(cleared) + "."
@@ -224,19 +201,9 @@ def render_policies_for_prompt() -> str:
 
 
 def determine_triggered_policy(quant_standing: str, qual_assessment: str) -> str:
-    """Resolves, in Python, which committee policy - if any - actually applies.
-
-    Same reasoning as describe_xgb_band: asked to synthesize a rationale that
-    must always name a policy, a small local model reliably reaches for one even
-    when the honest answer is that none fired - e.g. approving a clean profile
-    while citing "Policy 3 (Insufficient Data)" against a report that never says
-    the data was insufficient. The determination is made here, deterministically,
-    and handed to the CRO as a finished fact it may only repeat, the same way the
-    XGBoost band is.
-
-    qual_assessment must be the reconciled/floored assessment (see
-    reconcile_behavioral_assessment), not the model's raw reading - otherwise a
-    behavioral floor the qualitative model missed would never reach this check.
+    """Deterministically resolves which committee policy applies, so the CRO
+    only repeats it rather than inventing a citation. `qual_assessment` must
+    be the reconciled/floored value from reconcile_behavioral_assessment.
     """
     if quant_standing == "CRITICAL RISK":
         return (

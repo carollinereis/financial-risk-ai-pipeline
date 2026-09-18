@@ -22,6 +22,49 @@ const FILTERS = [
   { key: 'PENDING', label: 'Not analyzed' },
 ];
 
+const SORT_OPTIONS = [
+  { key: 'DEFAULT', label: 'Sorting' },
+  { key: 'ID_ASC', label: 'ID (Ascending)' },
+  { key: 'ID_DESC', label: 'ID (Descending)' },
+  { key: 'NAME_ASC', label: 'Name (A–Z)' },
+  { key: 'NAME_DESC', label: 'Name (Z–A)' },
+  { key: 'SCORE_DESC', label: 'Credit Score (High to Low)' },
+  { key: 'SCORE_ASC', label: 'Credit Score (Low to High)' },
+  { key: 'ANALYZED_NEWEST', label: 'Last Analyzed (Newest First)' },
+  { key: 'ANALYZED_OLDEST', label: 'Last Analyzed (Oldest First)' },
+];
+
+// A row with no audit yet has no last_analyzed_at. It must sort to the bottom
+// under EITHER date direction, not just whichever direction a naive string
+// fallback happens to favor - so the missing case is handled explicitly,
+// before either comparator does its real (ascending or descending) compare.
+const missingDateSortsLast = (aDate, bDate) => {
+  if (!aDate && !bDate) return 0;
+  if (!aDate) return 1;
+  if (!bDate) return -1;
+  return null;
+};
+
+const SORT_COMPARATORS = {
+  DEFAULT: (a, b) => {
+    const rankA = STANDING_ORDER[a.has_saved_audit ? a.decision_status : 'PENDING'] ?? 4;
+    const rankB = STANDING_ORDER[b.has_saved_audit ? b.decision_status : 'PENDING'] ?? 4;
+    return rankA - rankB || a.customer_id - b.customer_id;
+  },
+  ID_ASC: (a, b) => a.customer_id - b.customer_id,
+  ID_DESC: (a, b) => b.customer_id - a.customer_id,
+  NAME_ASC: (a, b) => (a.full_name || '').localeCompare(b.full_name || ''),
+  NAME_DESC: (a, b) => (b.full_name || '').localeCompare(a.full_name || ''),
+  SCORE_DESC: (a, b) => (b.credit_score ?? -Infinity) - (a.credit_score ?? -Infinity),
+  SCORE_ASC: (a, b) => (a.credit_score ?? Infinity) - (b.credit_score ?? Infinity),
+  ANALYZED_NEWEST: (a, b) =>
+    missingDateSortsLast(a.last_analyzed_at, b.last_analyzed_at) ??
+    b.last_analyzed_at.localeCompare(a.last_analyzed_at),
+  ANALYZED_OLDEST: (a, b) =>
+    missingDateSortsLast(a.last_analyzed_at, b.last_analyzed_at) ??
+    a.last_analyzed_at.localeCompare(b.last_analyzed_at),
+};
+
 // Matches the drawer's threshold: below this the saved and live probabilities
 // are the same score with rounding noise between them.
 const DRIFT_EPSILON = 0.005;
@@ -58,6 +101,7 @@ export function CustomerRegistry({
   const rows = customers;
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('ALL');
+  const [sortBy, setSortBy] = useState('DEFAULT');
 
   // Esc closes the panel; the overlay click alone is not reachable by keyboard.
   useEffect(() => {
@@ -71,7 +115,9 @@ export function CustomerRegistry({
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return rows
+    // Copied up front so filtering/sorting never mutates the `rows` prop, even
+    // if a future edit here reorders these steps or drops the filter step.
+    return [...rows]
       .filter((row) => {
         if (filter === 'ANALYZED' && !row.has_saved_audit) return false;
         if (filter === 'PENDING' && row.has_saved_audit) return false;
@@ -81,12 +127,8 @@ export function CustomerRegistry({
           (row.full_name || '').toLowerCase().includes(needle)
         );
       })
-      .sort((a, b) => {
-        const rankA = STANDING_ORDER[a.has_saved_audit ? a.decision_status : 'PENDING'] ?? 4;
-        const rankB = STANDING_ORDER[b.has_saved_audit ? b.decision_status : 'PENDING'] ?? 4;
-        return rankA - rankB || a.customer_id - b.customer_id;
-      });
-  }, [rows, query, filter]);
+      .sort(SORT_COMPARATORS[sortBy] || SORT_COMPARATORS.DEFAULT);
+  }, [rows, query, filter, sortBy]);
 
   if (!open) return null;
 
@@ -137,6 +179,18 @@ export function CustomerRegistry({
               </button>
             ))}
           </div>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            style={registryStyles.sortSelect}
+            aria-label="Sort by"
+          >
+            {SORT_OPTIONS.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div style={registryStyles.tableWrap}>
@@ -283,6 +337,17 @@ const registryStyles = {
     padding: '6px 12px',
     fontSize: '11px',
     fontWeight: '600',
+    cursor: 'pointer',
+  },
+  sortSelect: {
+    background: 'var(--bg)',
+    border: '1px solid var(--border)',
+    borderRadius: '6px',
+    color: 'var(--text-primary)',
+    padding: '7px 10px',
+    fontSize: '11px',
+    fontWeight: '600',
+    fontFamily: 'inherit',
     cursor: 'pointer',
   },
   tableWrap: { overflowY: 'auto', flex: 1 },

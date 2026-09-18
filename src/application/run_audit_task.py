@@ -8,6 +8,7 @@ exists at all, since DuckDB's agent_evaluations deliberately keeps only the curr
 
 from src.api.schemas import AuditResultResponse
 from src.application.run_risk_audit import RunRiskAuditUseCase
+from src.domain.entities import extract_rationale
 from src.infra.database.database import (
     CRO_DECISION_TO_VERDICT,
     QUAL_ASSESSMENT_TO_VERDICT,
@@ -32,6 +33,7 @@ def run_audit_task(customer_id: int, task_id: str) -> None:
             cro_decision=result.cro_report,
             quant_analysis=result.quant_report,
             qual_analysis=result.qual_report,
+            rationale=extract_rationale(result.cro_report),
             decision=result.decision,
             risk_tier=result.risk_tier,
             qual_assessment=result.qual_assessment,
