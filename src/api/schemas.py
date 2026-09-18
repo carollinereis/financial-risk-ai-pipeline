@@ -24,8 +24,12 @@ class CustomerProfileResponse(BaseModel):
     delinquencies_2yrs: int
     employment_length_years: int | None = None
     live_xgb_risk_score: float
-    cpf: str | None = None  # Sanitized / Masked PII
-    email: str | None = None  # Sanitized / Masked PII
+    cpf: str | None = None
+    email: str | None = None
+    phone_number: str | None = None
+    cpf_masked: str | None = None
+    email_masked: str | None = None
+    phone_masked: str | None = None
     sanitized_notes: str | None = None
 
     model_config = ConfigDict(from_attributes=True)

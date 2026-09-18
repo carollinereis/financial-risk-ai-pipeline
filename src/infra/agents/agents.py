@@ -78,6 +78,22 @@ def describe_credit_bracket(credit_score: int) -> str:
     return "EXCEPTIONAL"
 
 
+def describe_record_flags(delinquencies: int, employment_years: int | None, credit_score: int) -> str:
+    """Resolves the record-based red flags deterministically, so the agent repeats
+    a fixed list instead of comparing delinquency count and employment tenure
+    against their thresholds itself."""
+    flags = []
+    if delinquencies >= 1:
+        noun = "delinquency" if delinquencies == 1 else "delinquencies"
+        flags.append(f"{delinquencies} {noun} in the last 2 years")
+    if employment_years is not None and employment_years < 2:
+        flags.append(f"employment tenure of {employment_years} years, under the 2-year threshold")
+    bracket = describe_credit_bracket(credit_score)
+    if bracket in ("POOR", "FAIR"):
+        flags.append(f"{bracket} FICO bracket")
+    return "; ".join(flags) if flags else "None"
+
+
 # ==========================================
 # AGENT 1: QUANTITATIVE RISK ANALYST
 # ==========================================
@@ -135,8 +151,13 @@ the notes yourself: a credit score drop, credit usage called high or near-limit,
 late payments, collections, job loss, or financial distress. Write None only when the
 pre-scanned list is None and you found nothing.
 
-STEP 2 - Record flags: delinquencies of 1 or more (state the count); employment under 2 years
-(state the tenure); a POOR or FAIR FICO bracket.
+STEP 2 - The record has already been checked against the delinquency, tenure, and FICO
+thresholds. Pre-computed record flags (PRE-COMPUTED, AUTHORITATIVE): {record_flags}
+Report every pre-computed record flag on the RED FLAGS line exactly as given - they are
+established findings, not suggestions, and must not be judged, softened, or re-derived. Do NOT
+compare the delinquency count or employment tenure against their thresholds yourself; use only
+the pre-computed flags above for those two checks. Write None only when the pre-computed flags
+are None.
 
 STEP 3 - Assess:
 - NOTE FLAGS is not None  -> MEDIUM at minimum.
@@ -146,7 +167,7 @@ STEP 3 - Assess:
 
 Output exactly these four lines, nothing before or after:
 NOTE FLAGS: <quoted phrases from the notes, or None>
-RED FLAGS: <note flags plus record flags with exact values, or None>
+RED FLAGS: <note flags plus the pre-computed record flags, or None>
 POSITIVE SIGNALS: <list, or None>
 BEHAVIORAL RISK ASSESSMENT: <LOW, MEDIUM, HIGH, or INSUFFICIENT DATA>
 """)
@@ -280,10 +301,14 @@ def run_audit_committee(
     )
 
     note_flags = scan_note_triggers(sanitized_notes)
+    # Same reasoning as xgb_band/credit_bracket: the delinquency-count and
+    # employment-tenure comparisons are resolved here instead of left to the model.
+    record_flags = describe_record_flags(profile.delinquencies, employment, profile.credit_score)
     qual_res, qual_ms = _timed(qual_agent.invoke, {
         "behavioral_record": behavioral_record,
         "customer_notes": sanitized_notes if sanitized_notes else "No notes provided.",
         "note_flags": ", ".join(note_flags) if note_flags else "None",
+        "record_flags": record_flags,
     })
 
     # The qualitative tier is checkable against the structured record, so the model's

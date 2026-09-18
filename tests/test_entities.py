@@ -397,6 +397,31 @@ class TestNoteFlagFloor:
         assert tier == "HIGH"
 
 
+class TestMultiCauseFloorReason:
+    """The Ana Brown case: a POOR bracket and note-derived flags both fire. The
+    reason must name both, not just the more severe one, or the explanation reads
+    as if the notes were never considered."""
+
+    def test_reason_names_every_contributing_check_not_just_the_most_severe(self):
+        tier, reason = assess_behavioral_floor(
+            delinquencies=0,
+            employment_length_years=12,
+            credit_score=486,
+            note_flags=["credit score deterioration", "high credit utilisation"],
+        )
+        assert tier == "HIGH"
+        assert "POOR bracket" in reason
+        assert "credit score deterioration" in reason
+        assert "high credit utilisation" in reason
+
+    def test_a_single_contributing_check_produces_no_extra_separator(self):
+        tier, reason = assess_behavioral_floor(
+            delinquencies=0, employment_length_years=6, credit_score=580
+        )
+        assert tier == "HIGH"
+        assert reason == "credit score 580 is below 620 (POOR bracket)"
+
+
 class TestCroTierAlias:
     """The CRO agent reports 'CRITICAL', which is not in the domain tier enum."""
 

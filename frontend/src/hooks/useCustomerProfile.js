@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { API_BASE } from '../config';
 
-// Sanitized customer profile fields (the same shape the profile drawer and the
-// applicant card both render): masked PII, demographics, and the live XGBoost
-// default probability.
+// Customer profile fields (the same shape the profile drawer and the applicant
+// card both render): raw and masked PII, demographics, and the live XGBoost
+// default probability. Each view picks the raw or masked PII fields it needs.
 export function useCustomerProfile(customerId) {
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState(null);

@@ -118,6 +118,10 @@ def get_customer_profile(customer_id: int):
         live_xgb_risk_score=float(profile.get("live_xgb_risk_score", 0.0)),
         cpf=profile.get("cpf"),
         email=profile.get("email"),
+        phone_number=profile.get("phone_number"),
+        cpf_masked=profile.get("cpf_masked"),
+        email_masked=profile.get("email_masked"),
+        phone_masked=profile.get("phone_masked"),
         sanitized_notes=notes,
     )
 

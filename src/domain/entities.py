@@ -122,8 +122,11 @@ def assess_behavioral_floor(
     already structured, so the tier is computed here and used as a floor the model
     cannot undercut.
 
-    The reason travels with the tier so a verdict that contradicts the agent's own
-    prose can say which threshold produced it, rather than appearing unexplained.
+    The three checks below can each independently flag the record. Only the most
+    severe one decides the tier, but the reason names every check that flagged
+    something (i.e. did not come back LOW) rather than just the loudest one - the
+    same principle as explain_quantitative_standing on the policy side: a
+    multi-cause verdict must not read as if only one cause existed.
 
     credit_score and note_flags are optional so callers without them keep the
     delinquency/tenure floor; when supplied, the most severe floor wins.
@@ -133,9 +136,13 @@ def assess_behavioral_floor(
         credit_bracket_floor(credit_score),
         _note_flag_floor(note_flags),
     ]
-    # Later candidates only win on strict severity, so the delinquency reason survives a tie
-    # and the recorded explanation stays the most specific one available.
-    return max(candidates, key=lambda pair: BEHAVIORAL_SEVERITY[pair[0]])
+    tier = max(candidates, key=lambda pair: BEHAVIORAL_SEVERITY[pair[0]])[0]
+    reasons = [reason for candidate_tier, reason in candidates if candidate_tier != "LOW"]
+    # All three cleared: report the clean reading directly, from the delinquency/
+    # tenure check, matching the tie-break the old single-winner logic used.
+    if not reasons:
+        reasons = [candidates[0][1]]
+    return tier, "; ".join(reasons)
 
 
 def _note_flag_floor(note_flags: Sequence[str] | None) -> tuple[str, str]:

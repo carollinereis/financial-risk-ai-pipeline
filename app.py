@@ -80,7 +80,7 @@ with col4:
     )
 
 # PII Protection Status
-st.info(f"**PII Masking Active:** CPF: `{profile.get('cpf')}` | Email: `{profile.get('email')}`")
+st.info(f"**PII Masking Active:** CPF: `{profile.get('cpf_masked')}` | Email: `{profile.get('email_masked')}`")
 
 with st.expander("View Sanitized Customer History / Underwriter Notes"):
     st.text_area("Raw Context Logs (Sanitized):", notes, height=100, disabled=True)

@@ -57,6 +57,21 @@ def mask_phone(phone: str) -> str:
     return output if output != phone else "+55 ** *****-****"
 
 
+_PII_MASKS = {"cpf": mask_cpf, "email": mask_email, "phone_number": mask_phone}
+_PII_MASKED_KEYS = {"cpf": "cpf_masked", "email": "email_masked", "phone_number": "phone_masked"}
+
+
+def masked_pii_view(record: dict) -> dict:
+    """Returns `<field>_masked` values for every known PII field present in
+    record, e.g. {"cpf_masked": ...}. The record itself is left untouched, so
+    callers can expose both the raw and masked value side by side."""
+    return {
+        _PII_MASKED_KEYS[field]: mask(str(record[field]))
+        for field, mask in _PII_MASKS.items()
+        if field in record
+    }
+
+
 def get_sanitized_customer_data(customer_id: int) -> dict:
     """Fetches customer record from DuckDB, sanitizes notes, and masks PII."""
     with get_db_connection() as conn:

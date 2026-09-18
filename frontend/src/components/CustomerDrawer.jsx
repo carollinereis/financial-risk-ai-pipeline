@@ -71,7 +71,9 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
             <h3 style={{ color: 'var(--accent)', marginBottom: '10px' }}>Personal & Financial Demographics</h3>
             <div style={drawerStyles.grid}>
               <div><span style={drawerStyles.label}>Full Name:</span> <strong>{profile.full_name}</strong></div>
-              <div><span style={drawerStyles.label}>CPF (Masked):</span> <strong>{profile.cpf}</strong></div>
+              <div><span style={drawerStyles.label}>CPF (Masked):</span> <strong>{profile.cpf_masked}</strong></div>
+              <div><span style={drawerStyles.label}>Email (Masked):</span> <strong>{profile.email_masked}</strong></div>
+              <div><span style={drawerStyles.label}>Phone (Masked):</span> <strong>{profile.phone_masked}</strong></div>
               <div><span style={drawerStyles.label}>Credit Score:</span> <strong>{profile.credit_score}</strong></div>
               <div><span style={drawerStyles.label}>DTI Ratio:</span> <strong>{(profile.debt_to_income_ratio * 100).toFixed(1)}%</strong></div>
               <div><span style={drawerStyles.label}>Annual Income:</span> <strong>${profile.annual_income?.toLocaleString()}</strong></div>
