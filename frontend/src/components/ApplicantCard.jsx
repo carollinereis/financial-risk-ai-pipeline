@@ -34,7 +34,7 @@ export function ApplicantCard({ profile, error, audit, onOpenReport, onClear }) 
         <div>
           <h2 style={cardStyles.name}>{profile.full_name}</h2>
           <span style={cardStyles.meta}>
-            #{profile.customer_id} · CPF {profile.cpf}
+            #{profile.customer_id} · CPF {profile.cpf} · {profile.email} · {profile.phone_number}
           </span>
         </div>
         <div style={cardStyles.headActions}>

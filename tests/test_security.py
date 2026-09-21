@@ -15,6 +15,7 @@ from src.infra.security.security import (
     mask_cpf,
     mask_email,
     mask_phone,
+    masked_pii_view,
     sanitize_input,
 )
 
@@ -77,6 +78,39 @@ class TestMaskPhone:
 
     def test_unformatted_phone_is_masked(self):
         assert mask_phone("11987654321") != "11987654321"
+
+
+class TestMaskedPiiView:
+    def test_cpf_email_and_phone_all_get_masked_keys(self):
+        record = {
+            "customer_id": 101,
+            "cpf": "123.456.789-01",
+            "email": "caroline@example.com",
+            "phone_number": "+55 11 98765-4321",
+        }
+        view = masked_pii_view(record)
+        assert view["cpf_masked"] == "***.456.789-**"
+        assert view["email_masked"] == "c******e@example.com"
+        assert view["phone_masked"] == "+55 11 *****-4321"
+
+    def test_original_record_is_not_mutated(self):
+        record = {"cpf": "123.456.789-01", "email": "caroline@example.com"}
+        masked_pii_view(record)
+        assert record["cpf"] == "123.456.789-01"
+        assert record["email"] == "caroline@example.com"
+        assert "cpf_masked" not in record
+
+    def test_raw_fields_are_absent_from_the_view(self):
+        record = {"cpf": "123.456.789-01"}
+        assert "cpf" not in masked_pii_view(record)
+
+    def test_non_pii_fields_produce_no_view_entries(self):
+        record = {"customer_id": 101, "full_name": "Ana Souza", "credit_score": 700}
+        assert masked_pii_view(record) == {}
+
+    def test_missing_pii_fields_are_skipped_without_error(self):
+        record = {"customer_id": 101}
+        assert masked_pii_view(record) == {}
 
 
 class TestSanitizeInput:

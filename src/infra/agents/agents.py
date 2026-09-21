@@ -43,14 +43,8 @@ XGB_SEVERE_THRESHOLD = 0.75
 
 
 def describe_xgb_band(xgb_score: float) -> str:
-    """
-    Resolves the XGBoost score into its policy band in Python.
-
-    Small local models mis-evaluate numeric comparisons, which previously let a 4.23%
-    score be narrated as a "HIGH probability of default" whenever an unrelated hard
-    policy fired. The band is therefore computed here and handed to the agents as a
-    finished sentence they may only repeat.
-    """
+    """Resolves the XGBoost score into its policy band deterministically, so
+    agents repeat a fixed sentence instead of comparing the number themselves."""
     threshold = UnderwritingPolicy.XGB_HIGH_RISK_THRESHOLD
     if xgb_score > XGB_SEVERE_THRESHOLD:
         band = "HIGH"
@@ -73,13 +67,8 @@ def describe_xgb_band(xgb_score: float) -> str:
 
 
 def describe_credit_bracket(credit_score: int) -> str:
-    """
-    Resolves a credit score into its FICO bracket in Python.
-
-    Same reasoning as describe_xgb_band: the local model does not reliably evaluate
-    range comparisons, and it was silently dropping 620-669 scores into LOW instead of
-    the FAIR bracket. The bracket is named here so the agent matches a word, not a range.
-    """
+    """Resolves a credit score into its FICO bracket deterministically, so the
+    agent matches a word instead of comparing ranges itself."""
     if credit_score < 620:
         return "POOR"
     if credit_score < 670:
@@ -87,6 +76,22 @@ def describe_credit_bracket(credit_score: int) -> str:
     if credit_score < 740:
         return "GOOD"
     return "EXCEPTIONAL"
+
+
+def describe_record_flags(delinquencies: int, employment_years: int | None, credit_score: int) -> str:
+    """Resolves the record-based red flags deterministically, so the agent repeats
+    a fixed list instead of comparing delinquency count and employment tenure
+    against their thresholds itself."""
+    flags = []
+    if delinquencies >= 1:
+        noun = "delinquency" if delinquencies == 1 else "delinquencies"
+        flags.append(f"{delinquencies} {noun} in the last 2 years")
+    if employment_years is not None and employment_years < 2:
+        flags.append(f"employment tenure of {employment_years} years, under the 2-year threshold")
+    bracket = describe_credit_bracket(credit_score)
+    if bracket in ("POOR", "FAIR"):
+        flags.append(f"{bracket} FICO bracket")
+    return "; ".join(flags) if flags else "None"
 
 
 # ==========================================
@@ -146,8 +151,13 @@ the notes yourself: a credit score drop, credit usage called high or near-limit,
 late payments, collections, job loss, or financial distress. Write None only when the
 pre-scanned list is None and you found nothing.
 
-STEP 2 - Record flags: delinquencies of 1 or more (state the count); employment under 2 years
-(state the tenure); a POOR or FAIR FICO bracket.
+STEP 2 - The record has already been checked against the delinquency, tenure, and FICO
+thresholds. Pre-computed record flags (PRE-COMPUTED, AUTHORITATIVE): {record_flags}
+Report every pre-computed record flag on the RED FLAGS line exactly as given - they are
+established findings, not suggestions, and must not be judged, softened, or re-derived. Do NOT
+compare the delinquency count or employment tenure against their thresholds yourself; use only
+the pre-computed flags above for those two checks. Write None only when the pre-computed flags
+are None.
 
 STEP 3 - Assess:
 - NOTE FLAGS is not None  -> MEDIUM at minimum.
@@ -157,7 +167,7 @@ STEP 3 - Assess:
 
 Output exactly these four lines, nothing before or after:
 NOTE FLAGS: <quoted phrases from the notes, or None>
-RED FLAGS: <note flags plus record flags with exact values, or None>
+RED FLAGS: <note flags plus the pre-computed record flags, or None>
 POSITIVE SIGNALS: <list, or None>
 BEHAVIORAL RISK ASSESSMENT: <LOW, MEDIUM, HIGH, or INSUFFICIENT DATA>
 """)
@@ -233,6 +243,13 @@ EXECUTIVE RATIONALE: [2-3 impersonal sentences citing the exact policy triggers 
 cro_agent = cro_prompt | llm
 
 
+def _timed(fn, payload):
+    """Invokes fn(payload) and returns (result, elapsed_ms)."""
+    started = time.perf_counter()
+    result = fn(payload)
+    return result, int((time.perf_counter() - started) * 1000)
+
+
 # ==========================================
 # MULTI-AGENT ORCHESTRATION PIPELINE
 # ==========================================
@@ -262,24 +279,19 @@ def run_audit_committee(
     # Resolved once in Python so every agent narrates the same, arithmetically correct band.
     xgb_band = describe_xgb_band(xgb_score)
 
-    started = time.perf_counter()
-    quant_res = quant_agent.invoke({
+    quant_res, quant_ms = _timed(quant_agent.invoke, {
         "profile_data": profile_summary,
         "xgb_score": f"{xgb_score:.2%}",
         "xgb_band": xgb_band,
         "quant_standing": quant_standing
     })
-    quant_ms = int((time.perf_counter() - started) * 1000)
 
     # 3. Agent 2: Qualitative Audit Specialist
     # Behavioural facts come from structured columns, never from PII fields, so the
     # auditor can flag real history instead of guessing from free text alone.
     #
-    # DTI and loan amount are deliberately withheld: they are the Quantitative Agent's
-    # and the policy engine's territory. Supplying them here let the auditor rationalise
-    # a breaching ratio as a behavioural positive ("DTI 0.60 is not a red flag"), which
-    # is a scope leak no prompt instruction reliably suppresses. Withholding the field
-    # removes the possibility rather than forbidding it.
+    # DTI and loan amount are withheld: giving the auditor a breaching ratio invites
+    # it to rationalize it as a behavioral positive instead of flagging it.
     employment = profile.employment_length_years
     behavioral_record = (
         f"- Delinquencies (last 2 years): {profile.delinquencies}\n"
@@ -288,14 +300,16 @@ def run_audit_committee(
         f"(FICO bracket: {describe_credit_bracket(profile.credit_score)})"
     )
 
-    started = time.perf_counter()
     note_flags = scan_note_triggers(sanitized_notes)
-    qual_res = qual_agent.invoke({
+    # Same reasoning as xgb_band/credit_bracket: the delinquency-count and
+    # employment-tenure comparisons are resolved here instead of left to the model.
+    record_flags = describe_record_flags(profile.delinquencies, employment, profile.credit_score)
+    qual_res, qual_ms = _timed(qual_agent.invoke, {
         "behavioral_record": behavioral_record,
         "customer_notes": sanitized_notes if sanitized_notes else "No notes provided.",
         "note_flags": ", ".join(note_flags) if note_flags else "None",
+        "record_flags": record_flags,
     })
-    qual_ms = int((time.perf_counter() - started) * 1000)
 
     # The qualitative tier is checkable against the structured record, so the model's
     # reading is floored by deterministic policy - same reasoning as xgb_band - before
@@ -312,8 +326,7 @@ def run_audit_committee(
     qual_assessment = reconcile_behavioral_assessment(model_assessment, behavioral_floor)
 
     # 4. Agent 3: Chief Risk Officer (Synthesizer)
-    started = time.perf_counter()
-    cro_res = cro_agent.invoke({
+    cro_res, cro_ms = _timed(cro_agent.invoke, {
         "quant_report": quant_res.content,
         "qual_report": qual_res.content,
         # Rendered from src.domain.policy so the agent is judged against exactly the
@@ -322,7 +335,6 @@ def run_audit_committee(
         "xgb_band": xgb_band,
         "policy_determination": determine_triggered_policy(quant_standing, qual_assessment),
     })
-    cro_ms = int((time.perf_counter() - started) * 1000)
 
     return {
         "quant_analysis": quant_res.content,
@@ -337,10 +349,8 @@ def run_audit_committee(
     }
 
 if __name__ == "__main__":
-    # Corrected Isolated Agent Test using a mock domain entity
-    # Regression scenario: a single hard policy breach (DTI 0.45 > 0.40) paired with a
-    # LOW XGBoost score. The CRO must reject on the policy WITHOUT mislabelling 4.23%
-    # as a high probability of default.
+    # Isolated smoke test: DTI 0.45 breach with a LOW XGBoost score — verifies
+    # the CRO rejects on policy without recruiting the low score as evidence.
     mock_profile = CustomerProfile(
         customer_id=101,
         name="Alice Smith",

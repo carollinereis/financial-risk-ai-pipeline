@@ -13,6 +13,7 @@ from src.domain.entities import (
     credit_bracket_floor,
     derive_behavioral_floor,
     explain_behavioral_verdict,
+    extract_rationale,
     parse_behavioral_assessment,
     reconcile_behavioral_assessment,
 )
@@ -64,6 +65,27 @@ class TestCroDecisionParsing:
     def test_rationale_retains_full_report(self):
         report = "DECISION: REJECTED\nRISK TIER: HIGH\nEXECUTIVE RATIONALE: Three triggers."
         assert "Three triggers." in parse_cro(report).rationale
+
+
+class TestExtractRationale:
+    """The server-side EXECUTIVE RATIONALE extraction the dashboard renders -
+    previously duplicated as a regex in CustomerDrawer.jsx."""
+
+    def test_extracts_the_rationale_only(self):
+        report = "DECISION: REJECTED\nRISK TIER: HIGH\nEXECUTIVE RATIONALE: Three triggers."
+        assert extract_rationale(report) == "Three triggers."
+
+    def test_tolerates_markdown_around_the_label(self):
+        report = "**DECISION:** REJECTED\n**EXECUTIVE RATIONALE:**\nBad DTI."
+        assert extract_rationale(report) == "Bad DTI."
+
+    def test_falls_back_to_full_text_when_label_is_missing(self):
+        report = "No labelled fields here, just prose."
+        assert extract_rationale(report) == report
+
+    def test_empty_input_returns_empty_string(self):
+        assert extract_rationale("") == ""
+        assert extract_rationale(None) == ""
 
 
 class TestCroFailsClosed:
@@ -395,6 +417,31 @@ class TestNoteFlagFloor:
             note_flags=["high credit utilisation"],
         )
         assert tier == "HIGH"
+
+
+class TestMultiCauseFloorReason:
+    """The Ana Brown case: a POOR bracket and note-derived flags both fire. The
+    reason must name both, not just the more severe one, or the explanation reads
+    as if the notes were never considered."""
+
+    def test_reason_names_every_contributing_check_not_just_the_most_severe(self):
+        tier, reason = assess_behavioral_floor(
+            delinquencies=0,
+            employment_length_years=12,
+            credit_score=486,
+            note_flags=["credit score deterioration", "high credit utilisation"],
+        )
+        assert tier == "HIGH"
+        assert "POOR bracket" in reason
+        assert "credit score deterioration" in reason
+        assert "high credit utilisation" in reason
+
+    def test_a_single_contributing_check_produces_no_extra_separator(self):
+        tier, reason = assess_behavioral_floor(
+            delinquencies=0, employment_length_years=6, credit_score=580
+        )
+        assert tier == "HIGH"
+        assert reason == "credit score 580 is below 620 (POOR bracket)"
 
 
 class TestCroTierAlias:

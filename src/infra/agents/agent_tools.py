@@ -6,7 +6,7 @@ from xgboost import XGBClassifier
 
 from src.infra.config import DUCKDB_PATH, MODEL_PATH
 from src.infra.ml.credit_risk_model import FEATURE_COLUMNS, CreditRiskModel
-from src.infra.security.security import mask_cpf, mask_email, sanitize_input
+from src.infra.security.security import masked_pii_view, sanitize_input
 
 # ------------------------------------------------------------------
 # Module-level Model Caching (Loaded ONCE on module import)
@@ -29,7 +29,7 @@ def _predict_live_risk(record: dict[str, Any]) -> float:
     )
     proba = _MODEL.predict_proba(features)
 
-    # 2. Extract scalar value safely depending on return shape
+    # proba can come back as a numpy scalar, 0-D/1-D array, or plain float
     if hasattr(proba, "item"):
         proba_val = proba.item()  # Works for numpy scalars/0D/1D single-element arrays
     elif isinstance(proba, (list, tuple)):
@@ -45,7 +45,7 @@ def _predict_live_risk(record: dict[str, Any]) -> float:
 # ------------------------------------------------------------------
 def get_customer_financial_profile(customer_id: int) -> dict[str, Any]:
     """Fetches raw financial data from DuckDB, recalculates live XGBoost prediction,
-    and applies PII masking.
+    and attaches masked PII variants alongside the raw fields.
     """
     with duckdb.connect(str(DUCKDB_PATH), read_only=True) as conn:
         df = conn.execute(
@@ -57,23 +57,18 @@ def get_customer_financial_profile(customer_id: int) -> dict[str, Any]:
 
     record = df.iloc[0].to_dict()
 
-    # Redact PII fields before returning to LLM agent context
-    if "cpf" in record:
-        record["cpf"] = mask_cpf(str(record.get("cpf", "")))
-    if "email" in record:
-        record["email"] = mask_email(str(record.get("email", "")))
+    # cpf/email/phone_number stay raw; cpf_masked/email_masked/phone_masked are
+    # added alongside so each view picks the form it needs.
+    record.update(masked_pii_view(record))
 
     # Compute live inference score
     try:
         record["live_xgb_risk_score"] = float(_predict_live_risk(record))
     except Exception as e:
-        # Fallback to static stored score if live inference fails
-        fallback_score = record.get("risk_score", 0.0)
-        try:
-            record["live_xgb_risk_score"] = float(fallback_score)
-        except (TypeError, ValueError):
-            record["live_xgb_risk_score"] = 0.0
-        # Optional: keep the error message separately instead of overwriting the score
+        fallback_score = record.get("risk_score")
+        record["live_xgb_risk_score"] = (
+            float(fallback_score) if isinstance(fallback_score, (int, float)) else 0.0
+        )
         record["live_xgb_risk_score_error"] = str(e)
 
     return record
