@@ -148,3 +148,39 @@ class ScoreHistoryPoint(BaseModel):
 class RiskScoreHistoryPoint(BaseModel):
     date: str
     score: float
+
+
+# ------------------------------------------------------------------
+# Document Intelligence DTOs
+# ------------------------------------------------------------------
+class ExtractedEntities(BaseModel):
+    borrower_name: str | None = None
+    loan_amount: float | None = None
+    interest_rate: float | None = None
+    term_months: int | None = None
+    signature_present: bool = False
+
+
+class DocumentExtractionResult(BaseModel):
+    customer_id: int
+    document_name: str
+    entities: ExtractedEntities
+    risk_flags: list[str] = []
+    executive_summary: str = ""
+    # NEEDS_REVIEW when the LLM's JSON failed schema validation and some fields
+    # were dropped rather than guessed; OK when the full response parsed cleanly.
+    review_status: str = "OK"
+    execution_time_ms: int = 0
+    extracted_at: str | None = None
+
+
+class DocumentExtractionTaskStartedResponse(BaseModel):
+    task_id: str
+    status: str = "PENDING"
+
+
+class DocumentExtractionTaskStatusResponse(BaseModel):
+    task_id: str
+    status: str
+    result: DocumentExtractionResult | None = None
+    error: str | None = None

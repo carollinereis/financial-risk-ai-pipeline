@@ -19,10 +19,11 @@ By automating this multi-layered analysis, bank employees save significant time 
 * **Privacy & Security Guardrails:** Customer records pass through a sanitization layer before reaching the LLM. Sensitive PII, such as Brazilian CPFs, email addresses, and phone numbers is automatically masked, and potential prompt injection attempts are redacted.
 * **Data Architecture:** The system uses DuckDB as an in-memory transactional database. It includes structured test scenarios engineered for definitive approval or rejection outcomes, alongside synthetic data simulating real-world portfolio analytics.
 * **Database & Persistence Layer:** Operates DuckDB for in-memory analytical scenario testing combined with a containerized PostgreSQL 16 database for frontend transactional state and application data.
+* **Document Intelligence:** A standalone extraction pipeline reads one generated mock loan contract per customer and pulls out borrower name, loan amount, interest rate, term, and signature status through a JSON-mode LLM call, validated with Pydantic — a malformed response is salvaged field-by-field rather than guessed, and the record is flagged for review instead. A deterministic Python check, not the LLM's own judgment, compares the extracted borrower name against the registered customer record and flags a mismatch. This pipeline is fully independent of the three-agent committee above and never influences the credit decision; it only surfaces paperwork-level issues (rate above the legal cap, a missing signature, a name that doesn't match) for the underwriter to review alongside it.
 ---
 
 ## Tech Stack
 
-* **Backend & Agent Committee:** Python, FastAPI, LangChain, XGBoost, Llama 3.1 (Ollama)
+* **Backend & Agent Committee:** Python, FastAPI, LangChain, Pydantic, XGBoost, Llama 3.1 (Ollama)
 * **Database & Infrastructure:** DuckDB, PostgreSQL 16 (Dockerized)
 * **Frontend:** React, Vite, Recharts, Lucide React <br>👉 *See the [`/frontend`](./frontend) directory for UI, architecture overview, and local setup instructions.*

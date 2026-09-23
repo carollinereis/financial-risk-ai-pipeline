@@ -16,6 +16,7 @@ from src.domain.entities import (
 from src.domain.policy import (
     UnderwritingPolicy,
     determine_triggered_policy,
+    explain_quantitative_standing,
     render_policies_for_prompt,
     scan_note_triggers,
 )
@@ -195,6 +196,14 @@ This band was computed deterministically and is the ONLY permitted reading of th
 Do NOT perform any numeric comparison of your own, and do NOT accept a contradictory
 characterisation of the score from the reports above - they may contain arithmetic errors.
 
+--- QUANTITATIVE BASIS, PRE-COMPUTED - AUTHORITATIVE ---
+{quant_basis}
+
+This line names every threshold - credit score, DTI, and XGBoost score - as either breached
+or cleared, computed directly from the structured record. It is the ONLY permitted source for
+which metric caused a CRITICAL RISK verdict. The quantitative report above may misattribute the
+cause to the wrong metric; do NOT cite a metric as the trigger unless this line marks it Breach.
+
 HARD BANK UNDERWRITING POLICIES (MANDATORY):
 {policy_block}
 
@@ -221,9 +230,9 @@ CRITICAL OVERRIDE DIRECTIVES (NON-NEGOTIABLE ENFORCEMENT):
 
 RATIONALE STYLE (MANDATORY):
 - Write impersonally. Do NOT use 'I', 'we', or 'my decision'.
-- Cite only the policy the PRE-COMPUTED POLICY DETERMINATION names as TRIGGERED, with the exact
-  values from the reports that back it (e.g., "DTI Ratio of 0.42 exceeds maximum allowed threshold
-  of 0.40 under Policy 1"). If it says NO POLICY IS TRIGGERED, cite none.
+- Cite only the policy the PRE-COMPUTED POLICY DETERMINATION names as TRIGGERED, using the exact
+  metric and value the PRE-COMPUTED QUANTITATIVE BASIS above marks as Breach to back it - never a
+  metric that basis marks Cleared. If it says NO POLICY IS TRIGGERED, cite none.
 - Do NOT restate or summarize the policy list.
 - Report the XGBoost score only with the band given in the PRE-COMPUTED section above.
 - When the DECISION is REJECTED on a hard policy violation AND that band is LOW, the rationale
@@ -326,6 +335,13 @@ def run_audit_committee(
     qual_assessment = reconcile_behavioral_assessment(model_assessment, behavioral_floor)
 
     # 4. Agent 3: Chief Risk Officer (Synthesizer)
+    # Named per-metric, computed straight from the structured record - not read off
+    # the quantitative report's own prose - so the CRO cannot misattribute a
+    # CRITICAL verdict to a metric that actually cleared its threshold (the
+    # citation-hallucination bug this line exists to close off).
+    quant_basis = explain_quantitative_standing(
+        credit_score=profile.credit_score, dti=profile.dti, xgb_score=xgb_score
+    )
     cro_res, cro_ms = _timed(cro_agent.invoke, {
         "quant_report": quant_res.content,
         "qual_report": qual_res.content,
@@ -334,6 +350,7 @@ def run_audit_committee(
         "policy_block": render_policies_for_prompt(),
         "xgb_band": xgb_band,
         "policy_determination": determine_triggered_policy(quant_standing, qual_assessment),
+        "quant_basis": quant_basis,
     })
 
     return {
