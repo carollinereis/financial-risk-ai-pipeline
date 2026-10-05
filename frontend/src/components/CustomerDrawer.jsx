@@ -1,9 +1,13 @@
 // src/components/CustomerDrawer.jsx
+import { useState } from 'react';
 import { useCommitteeAudit } from '../hooks/useCommitteeAudit';
 import { useCustomerProfile } from '../hooks/useCustomerProfile';
+import { useDocumentExtraction } from '../hooks/useDocumentExtraction';
 import { AgentReport } from './AgentReport';
+import { CombinedReportPreview } from './CombinedReportPreview';
+import { DocumentIntelligence } from './DocumentIntelligence';
 
-const DECISION_COLORS = {
+export const DECISION_COLORS = {
   APPROVED: 'var(--status-approved)',
   REJECTED: 'var(--status-rejected)',
   'MANUAL REVIEW REQUIRED': 'var(--status-review)',
@@ -33,6 +37,18 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
   const { profile } = useCustomerProfile(customerId);
   const { audit, auditSource, loadingSaved, loading, taskStatus, auditError, justCompleted, runAudit } =
     useCommitteeAudit(customerId, onAuditComplete);
+  const {
+    extraction,
+    loading: docLoading,
+    taskStatus: docTaskStatus,
+    error: docError,
+    runExtraction,
+  } = useDocumentExtraction(customerId);
+  const [showReport, setShowReport] = useState(false);
+
+  // Both halves of the combined report must exist before it can be previewed -
+  // never a report with a silent gap where one section never ran.
+  const canViewReport = Boolean(audit) && Boolean(extraction);
 
   const lastAnalyzed = formatDate(audit?.last_analyzed_at);
   const auditAgeDays = daysSince(audit?.last_analyzed_at);
@@ -223,8 +239,53 @@ export function CustomerDrawer({ customerId, onClose, onAuditComplete }) {
               </div>
             )}
           </div>
+
+          {/* Scope line: the section above judges credit risk, the one below only
+              checks the contract's paperwork - without this the two can read as
+              competing verdicts on the same question. */}
+          <p style={{ fontSize: '11px', color: 'var(--text-secondary)', fontStyle: 'italic', margin: 0, textAlign: 'center' }}>
+            Document Intelligence checks the contract's paperwork only (rate, signature,
+            borrower match) — it does not evaluate credit risk, which is the Committee
+            Decision's job above.
+          </p>
+
+          {/* Section 5: Document Intelligence - independent of the committee above,
+              its own task table and endpoint family. */}
+          <DocumentIntelligence
+            extraction={extraction}
+            loading={docLoading}
+            taskStatus={docTaskStatus}
+            error={docError}
+            runExtraction={runExtraction}
+          />
+
+          {/* Section 6: Combined Report - gated on both sections above existing. */}
+          <div style={drawerStyles.section}>
+            <h3 style={{ color: 'var(--accent)', marginBottom: '10px' }}>Combined Report</h3>
+            <button
+              onClick={() => setShowReport(true)}
+              disabled={!canViewReport}
+              style={drawerStyles.auditBtn}
+            >
+              View Report
+            </button>
+            {!canViewReport && (
+              <p style={drawerStyles.noAudit}>
+                Run the committee audit and document extraction first.
+              </p>
+            )}
+          </div>
         </div>
       </div>
+
+      {showReport && (
+        <CombinedReportPreview
+          profile={profile}
+          audit={audit}
+          extraction={extraction}
+          onClose={() => setShowReport(false)}
+        />
+      )}
     </div>
   );
 }
@@ -245,7 +306,7 @@ function AgentSection({ label, verdict, basis, text }) {
   );
 }
 
-const drawerStyles = {
+export const drawerStyles = {
   overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'flex-end', zIndex: 1000 },
   // Wide enough for a comfortable reading measure on the agent prose, capped so it
   // never swallows the dashboard behind it on a narrow screen.

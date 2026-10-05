@@ -1,3 +1,4 @@
+import json
 import uuid
 from contextlib import asynccontextmanager
 
@@ -13,11 +14,17 @@ from src.api.schemas import (
     CustomerListItem,
     CustomerProfileResponse,
     CustomerRegistryItem,
+    DocumentExtractionResult,
+    DocumentExtractionTaskStartedResponse,
+    DocumentExtractionTaskStatusResponse,
+    ExtractedEntities,
     RiskScoreHistoryPoint,
     SavedAuditResponse,
     ScoreHistoryPoint,
 )
 from src.application.run_audit_task import run_audit_task
+from src.application.run_document_extraction import mock_document_path
+from src.application.run_document_extraction_task import run_document_extraction_task
 from src.domain.entities import extract_rationale
 from src.domain.policy import policy_reference
 from src.infra.agents.agent_tools import (
@@ -40,7 +47,13 @@ from src.infra.database.database import (
     record_human_override,
     seed_sample_agent_analytics,
 )
-from src.infra.database.postgres.models import AuditTask, CreditHistoryEntry, RiskScoreHistoryEntry
+from src.infra.database.postgres.models import (
+    AuditTask,
+    CreditHistoryEntry,
+    DocumentExtraction,
+    DocumentExtractionTask,
+    RiskScoreHistoryEntry,
+)
 from src.infra.database.postgres.session import get_session
 
 
@@ -186,6 +199,97 @@ def get_task_status(task_id: str):
             result=result,
             error=task.error,
         )
+
+
+@app.post(
+    "/customers/{customer_id}/documents/extract",
+    response_model=DocumentExtractionTaskStartedResponse,
+    status_code=202,
+)
+def extract_document(customer_id: int, background_tasks: BackgroundTasks):
+    """Kicks off entity extraction for this customer's own mock document in the
+    background. There is exactly one generated document per customer_id (see
+    generate_mock_documents.py), so there is nothing for the caller to choose.
+
+    Fully independent of the committee pipeline: this never touches agents.py or
+    the audit tables. Returns immediately with a task id the client polls via
+    GET /documents/tasks/{task_id}.
+    """
+    document_path = mock_document_path(customer_id)
+    if not document_path.is_file():
+        raise HTTPException(
+            status_code=404, detail=f"No mock document generated for customer {customer_id}."
+        )
+
+    task_id = uuid.uuid4().hex
+    with get_session() as session:
+        session.add(
+            DocumentExtractionTask(
+                id=task_id,
+                customer_id=customer_id,
+                document_name=document_path.name,
+                status="PENDING",
+            )
+        )
+
+    background_tasks.add_task(run_document_extraction_task, customer_id, task_id)
+    return DocumentExtractionTaskStartedResponse(task_id=task_id, status="PENDING")
+
+
+@app.get("/documents/tasks/{task_id}", response_model=DocumentExtractionTaskStatusResponse)
+def get_document_task_status(task_id: str):
+    """Polling endpoint for an async extraction task started via
+    POST /customers/{id}/documents/extract. Separate from /tasks/{task_id}, which
+    is typed specifically to the committee's AuditTask.
+    """
+    with get_session() as session:
+        task = session.get(DocumentExtractionTask, task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
+
+        result = (
+            DocumentExtractionResult.model_validate_json(task.result_json)
+            if task.result_json
+            else None
+        )
+        return DocumentExtractionTaskStatusResponse(
+            task_id=task.id,
+            status=task.status,
+            result=result,
+            error=task.error,
+        )
+
+
+@app.get("/customers/{customer_id}/documents", response_model=list[DocumentExtractionResult])
+def list_customer_documents(customer_id: int):
+    """Lists saved extraction results for a customer, most recent first. A plain
+    Postgres read: opening this never spends an LLM call.
+    """
+    with get_session() as session:
+        rows = (
+            session.query(DocumentExtraction)
+            .filter(DocumentExtraction.customer_id == customer_id)
+            .order_by(DocumentExtraction.extracted_at.desc())
+            .all()
+        )
+        return [
+            DocumentExtractionResult(
+                customer_id=row.customer_id,
+                document_name=row.document_name,
+                entities=ExtractedEntities(
+                    borrower_name=row.borrower_name,
+                    loan_amount=row.loan_amount,
+                    interest_rate=row.interest_rate,
+                    term_months=row.term_months,
+                    signature_present=row.signature_present,
+                ),
+                risk_flags=json.loads(row.risk_flags_json),
+                executive_summary=row.executive_summary,
+                review_status=row.review_status,
+                extracted_at=row.extracted_at.isoformat(),
+            )
+            for row in rows
+        ]
 
 
 @app.get("/customers/{customer_id}/score-history", response_model=list[ScoreHistoryPoint])
