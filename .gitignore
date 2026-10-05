@@ -1,6 +1,5 @@
 node_modules/
 
-.DS_Store
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -217,31 +216,15 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Streamlit
+# Streamlit (legacy UI, app.py)
 .streamlit/secrets.toml
-venv/
+
+# Ignore generated databases and local data
 *.db
-
-# Ignore databases and local data
-data/*.db
-data/*.duckdb
-data/*.csv
-
-# Python bytecode & cache
-__pycache__/
-*.pyc
-*.pyo
-
-# Virtual environment
-venv/
-.venv/
-
-# Database files
 *.duckdb
 *.duckdb.wal
+src/infra/data/*.csv
 
-# Local environment variables / secrets
-.env
 # Claude Code personal instructions
 CLAUDE.local.md
 claude/
@@ -260,8 +243,8 @@ notes/*
 !notes/phase3_model_security.md
 !notes/phase4_llm_agents.md
 !notes/phase5_End-to-End.md
-!notes/phase6_FastAPI + Pydantic
-!notes/phase7_Frontend_Integration
+!notes/phase6_FastAPI_Pydantic.md
+!notes/phase7_Frontend_Integration.md
 
 # OS Generated Files
 .DS_Store

@@ -1,13 +1,9 @@
 """Tests for src/infra/agents/agents.py.
 
-Focused specifically on the CRO's quant_basis citation fix in
-run_audit_committee() / cro_prompt, which previously had zero test coverage -
-that gap is why the original citation-hallucination bug (Policy 1 citing DTI
-when credit score was the actual trigger) shipped uncaught.
-explain_quantitative_standing() itself is already thoroughly covered in
-test_policy.py; nothing here duplicates that - these tests only check it is
-correctly wired into the CRO prompt (Layers 1-2) and that the real model
-actually uses it (Layer 3).
+Added test coverage for the CRO's quant_basis citation integration within run_audit_committee() 
+and cro_prompt. These tests specifically verify that explain_quantitative_standing() 
+is correctly wired into the CRO prompt (Layers 1–2) 
+and that the model actively uses it in practice (Layer 3).
 """
 
 import pytest
@@ -16,22 +12,14 @@ from src.domain.entities import CustomerProfile
 from src.domain.policy import UnderwritingPolicy, explain_quantitative_standing
 from src.infra.agents import agents
 
-# Three single-trigger profiles: each breaches exactly one of the three
-# CRITICAL RISK inputs (credit score, DTI, XGBoost score), so a rationale
-# naming the wrong one is unambiguous.
+# Three single-trigger profiles: each breaches exactly one CRITICAL RISK 
+# input (credit score, DTI, or XGBoost score) to ensure rationales can be 
+# unambiguously validated for exact metric attribution.
 #
-# CREDIT_SCORE_ALONE deliberately pairs the breach with a DTI close to (but
-# under) its own 0.40 cap rather than a clearly-safe DTI: against the unfixed
-# prompt this is exactly the ambiguity that reproduced the original bug - the
-# CRO fabricated "DTI Ratio of 0.38 exceeds maximum allowed threshold of
-# 0.40" (0.38 does not exceed 0.40) and ignored the real credit-score breach.
-# A clearly-safe DTI (e.g. 0.20) did not reproduce the bug in manual testing;
-# this near-miss value does, consistently, at temperature=0.0. DTI_ALONE and
-# XGB_ALONE use clearly-safe values for the other two metrics because, in the
-# same manual testing, near-miss values there did not reliably discriminate
-# fixed from unfixed behaviour (or, in one XGB_ALONE combination, exposed a
-# separate, deeper hallucination this specific fix does not resolve - the
-# model contradicted its own PRE-COMPUTED QUANTITATIVE BASIS outright).
+# CREDIT_SCORE_ALONE pairs the credit score breach with a DTI value close to 
+# (but strictly under) the 0.40 cap. This tests the prompt's ability to 
+# distinguish near-threshold compliant metrics from the actual breach. 
+# DTI_ALONE and XGB_ALONE use safe baseline values for non-triggering metrics.
 CREDIT_SCORE_ALONE = {"credit_score": 600, "dti": 0.38, "xgb_score": 0.10}
 DTI_ALONE = {"credit_score": 625, "dti": 0.55, "xgb_score": 0.05}
 XGB_ALONE = {"credit_score": 750, "dti": 0.20, "xgb_score": 0.65}
@@ -109,7 +97,7 @@ class TestCroQuantBasisWiring:
         assert payload["quant_basis"] == explain_quantitative_standing(**CREDIT_SCORE_ALONE)
         assert "credit score 600 < 620" in payload["quant_basis"]
         # DTI is close to its cap but still cleared, so it must be named cleared -
-        # not phrased as a breach (the exact fabrication the original bug made).
+        # not phrased as a breach.
         assert "DTI 38% within the 40% ceiling" in payload["quant_basis"]
 
     def test_dti_alone_cites_dti_not_credit_score(self, monkeypatch):
@@ -142,14 +130,11 @@ class TestCroPromptTemplate:
 
 @pytest.mark.integration
 class TestCroCitationAgainstRealModel:
-    """Layer 3: the real committee, run against an actual local Ollama model.
+    """Layer 3: End-to-end evaluation using a live local Ollama model.
 
-    This is a best-effort check on LLM prose, not a hard guarantee - llama3.1
-    does not reliably follow instructions (see the comment above
-    NOTE_TRIGGER_PATTERNS in src/domain/policy.py for another documented case
-    of the same unreliability). An occasional failure here from unusual model
-    phrasing is a real possibility and not necessarily a regression; a
-    consistent failure across runs is the signal worth investigating.
+    Evaluates model output against actual LLM responses. Flakiness due to 
+    variations in model phrasing across isolated runs is possible; consistent 
+    failures across multiple runs indicate a structural regression.
     """
 
     def _run(self, credit_score, dti, xgb_score):

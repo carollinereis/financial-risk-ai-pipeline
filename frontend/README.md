@@ -14,39 +14,33 @@ This is the frontend for a multi-agent credit underwriting engine. Underwriters 
 
 [6. Underwriting Policy for Reference](./img/Underwriting-Policy-Reference.png)
 
+[7. Document Intelligence](./img/document-intelligence.png)
+
+[8. Combined Report](./img/combined-report.png)
+
 ## What it does
 
 - **Portfolio overview:** Track real-time KPIs, approve/reject splits, default risk by credit score band, and Top 5 lists for riskiest applicants and largest loans.
 - **Customer view:** Inspect applicant profiles, score history, agent recommendations, and portfolio comparisons via sidebar selection or `⌘K` search.
 - **On-demand audits:** Saved reports load instantly; fresh three-agent AI audits run on demand.
 - **Human in the loop:** Split agent decisions automatically route to an exception queue where overrides require a logged reason and operator attribution.
-- **Document Intelligence:** Each customer has one generated mock loan contract; a single click extracts borrower name, loan amount, rate, term, and signature status, and lists any document issues (rate above the legal cap, a missing signature, a borrower name mismatch) alongside an executive summary. It checks the contract's paperwork only — it doesn't evaluate credit risk, which stays the committee's job.
+- **Document Intelligence:** Each customer has one generated mock loan contract; a single click extracts borrower name, loan amount, rate, term, and signature status, and lists any document issues (rate above the legal cap, a missing signature, a borrower name mismatch) alongside an executive summary. It checks the contract's paperwork only. It doesn't evaluate credit risk, which stays the committee's job.
 - **Combined report:** Once both the committee audit and document extraction exist for a customer, preview a combined report and download it as a PDF, generated client-side from the rendered preview so the download always matches what was reviewed on screen.
 
 ## Prerequisites
 
 * **Node.js:** `v20.19+` or `v22.12+`
-* **Docker & Docker Compose:** Required to run the PostgreSQL database service.
-* **FastAPI Backend:** Running on `http://localhost:8000`
-* **Ollama:** Running locally with `Llama 3.1` (required for generating fresh audits and document extractions)
+* **FastAPI Backend:** Running on `http://localhost:8000`. See [`/src`](../src) for setup (Postgres, migrations, model training, Ollama).
 
 ## Getting Started
 
-1. **Start the Database Infrastructure** (from repository root):
+1. **Set up and run the backend first.** Follow [`/src`](../src)'s Getting Started (Postgres, migrations, data, and `uvicorn src.api.main:app --reload`).
+
+2. **Run the frontend** (from this directory):
    ```bash
-   docker compose up -d postgres
+   npm install
+   npm run dev
    ```
-
-2. **Run the Backend** (from the repository root):
-   ```bash
-   uvicorn src.api.main:app --reload
-    ```
-
-3. **Run the Frontend** (from this directory):
-    ```bash
-    npm install
-    npm run dev
-    ```
 
 3. Open `http://localhost:5173` in your browser. Interactive API documentation is available at `http://localhost:8000/docs` while the backend is active.
 

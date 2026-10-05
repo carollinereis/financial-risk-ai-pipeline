@@ -1,5 +1,6 @@
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -271,7 +272,14 @@ def run_audit_committee(
     """
     Pure Multi-Agent Execution Unit.
     Receives pre-fetched domain entity and calculated features, executes
-    the 3 LLM agents sequentially, and returns structured results.
+    the 3 LLM agents, and returns structured results.
+
+    Quant and Qual read disjoint inputs - neither depends on the other's output -
+    so they run concurrently in two threads. CRO alone needs both reports, so it
+    runs after the pair finishes. ChatOllama.invoke() blocks on network I/O to the
+    local Ollama server, which releases the GIL, so two threads genuinely overlap
+    rather than serializing in Python; whether Ollama itself then processes both
+    requests in parallel depends on its own OLLAMA_NUM_PARALLEL setting.
     """
     # 1. Format profile text from Domain Entity (No DB calls!)
     profile_summary = (
@@ -284,18 +292,17 @@ def run_audit_committee(
         f"Delinquencies (2 yrs): {profile.delinquencies}"
     )
 
-    # 2. Agent 1: Quantitative Risk Analyst
+    # 2. Build Agent 1's payload: Quantitative Risk Analyst
     # Resolved once in Python so every agent narrates the same, arithmetically correct band.
     xgb_band = describe_xgb_band(xgb_score)
-
-    quant_res, quant_ms = _timed(quant_agent.invoke, {
+    quant_payload = {
         "profile_data": profile_summary,
         "xgb_score": f"{xgb_score:.2%}",
         "xgb_band": xgb_band,
-        "quant_standing": quant_standing
-    })
+        "quant_standing": quant_standing,
+    }
 
-    # 3. Agent 2: Qualitative Audit Specialist
+    # 3. Build Agent 2's payload: Qualitative Audit Specialist
     # Behavioural facts come from structured columns, never from PII fields, so the
     # auditor can flag real history instead of guessing from free text alone.
     #
@@ -313,12 +320,20 @@ def run_audit_committee(
     # Same reasoning as xgb_band/credit_bracket: the delinquency-count and
     # employment-tenure comparisons are resolved here instead of left to the model.
     record_flags = describe_record_flags(profile.delinquencies, employment, profile.credit_score)
-    qual_res, qual_ms = _timed(qual_agent.invoke, {
+    qual_payload = {
         "behavioral_record": behavioral_record,
         "customer_notes": sanitized_notes if sanitized_notes else "No notes provided.",
         "note_flags": ", ".join(note_flags) if note_flags else "None",
         "record_flags": record_flags,
-    })
+    }
+
+    # 4. Run Agent 1 and Agent 2 concurrently - both payloads are ready and
+    # independent of each other, so neither has to wait on the other.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        quant_future = executor.submit(_timed, quant_agent.invoke, quant_payload)
+        qual_future = executor.submit(_timed, qual_agent.invoke, qual_payload)
+        quant_res, quant_ms = quant_future.result()
+        qual_res, qual_ms = qual_future.result()
 
     # The qualitative tier is checkable against the structured record, so the model's
     # reading is floored by deterministic policy - same reasoning as xgb_band - before
@@ -334,7 +349,7 @@ def run_audit_committee(
     )
     qual_assessment = reconcile_behavioral_assessment(model_assessment, behavioral_floor)
 
-    # 4. Agent 3: Chief Risk Officer (Synthesizer)
+    # 5. Agent 3: Chief Risk Officer (Synthesizer)
     # Named per-metric, computed straight from the structured record - not read off
     # the quantitative report's own prose - so the CRO cannot misattribute a
     # CRITICAL verdict to a metric that actually cleared its threshold (the
